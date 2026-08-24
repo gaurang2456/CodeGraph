@@ -6,6 +6,8 @@ export interface FileCitation {
   language: string;
   snippet?: string;
   lineRange?: string;
+  startLine?: number;
+  endLine?: number;
 }
 
 export interface ChatMessage {
@@ -14,7 +16,7 @@ export interface ChatMessage {
   content: string;
   timestamp: string;
   citations?: FileCitation[];
-  confidenceScore?: number; // e.g. 0.96 for 96%
+  confidenceScore?: number;
   isStreaming?: boolean;
   implementationPlan?: {
     step: number;
@@ -25,7 +27,7 @@ export interface ChatMessage {
 
 export interface Technology {
   name: string;
-  category: 'language' | 'framework' | 'database' | 'caching' | 'auth' | 'build' | 'container';
+  category: 'language' | 'framework' | 'database' | 'caching' | 'auth' | 'build' | 'container' | 'tools';
   icon?: string;
   color?: string;
 }
@@ -46,8 +48,8 @@ export interface RepositorySummary {
   frontend: string;
   authentication: string;
   database: string;
-  caching: string;
-  buildTool: string;
+  caching?: string;
+  buildTool?: string;
   description: string;
   keyPackages: string[];
 }
@@ -88,20 +90,23 @@ export interface Repository {
   name: string;
   fullName: string;
   url?: string;
-  size: string;
+  size?: string;
   primaryLanguage: string;
   framework: string;
   fileCount: number;
   folderCount: number;
   estimatedTokens: number;
   branch: string;
-  commitCount: number;
-  status: 'indexed' | 'indexing' | 'error';
-  lastIndexedAt: string;
+  commitCount?: number;
+  status: 'PENDING' | 'DOWNLOADING' | 'EXTRACTING' | 'SCANNING' | 'PARSING' | 'CHUNKING' | 'EMBEDDING' | 'COMPLETED' | 'FAILED' | 'indexed' | 'indexing' | 'error';
+  stage?: string;
+  progress?: number;
+  lastIndexedAt?: string;
   stats?: RepositoryStats;
   technologies: Technology[];
   summary: RepositorySummary;
-  sampleQuestions: string[];
+  sampleQuestions?: string[];
+  errorMessage?: string;
   graphNodes?: GraphNode[];
   graphEdges?: GraphEdge[];
   fileTree?: FileTreeNode;

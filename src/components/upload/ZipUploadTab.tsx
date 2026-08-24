@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import { Button } from '@/components/ui/Button';
 
 export interface ZipUploadTabProps {
-  onStartUpload: (filename: string) => void;
+  onStartUpload: (file: File) => void;
 }
 
 export const ZipUploadTab: React.FC<ZipUploadTabProps> = ({ onStartUpload }) => {
@@ -82,7 +82,7 @@ export const ZipUploadTab: React.FC<ZipUploadTabProps> = ({ onStartUpload }) => 
         <Button
           variant="primary"
           disabled={!selectedFile}
-          onClick={() => selectedFile && onStartUpload(selectedFile.name)}
+          onClick={() => selectedFile && onStartUpload(selectedFile)}
           className="w-full sm:w-auto"
         >
           <span className="material-symbols-outlined text-[18px] mr-1.5">rocket_launch</span>

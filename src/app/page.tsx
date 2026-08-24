@@ -1,9 +1,7 @@
 'use client';
 
-import React, { useState } from 'react';
-import { Repository, TabType, IndexingStepStatus } from '@/types';
-import { SAMPLE_REPOSITORIES } from '@/services/mockData';
-import { MockApiService, INITIAL_INDEXING_STEPS } from '@/services/mockApi';
+import React, { useState, useEffect } from 'react';
+import { Repository, TabType } from '@/types';
 
 import { Navbar } from '@/components/layout/Navbar';
 import { Sidebar } from '@/components/layout/Sidebar';
@@ -22,55 +20,197 @@ import { FileExplorerView } from '@/components/files/FileExplorerView';
 import { AnalysisView } from '@/components/analysis/AnalysisView';
 
 export default function Home() {
-  const [repositories, setRepositories] = useState<Repository[]>(SAMPLE_REPOSITORIES);
-  const [activeRepo, setActiveRepo] = useState<Repository | null>(SAMPLE_REPOSITORIES[0]);
+  const [repositories, setRepositories] = useState<Repository[]>([]);
+  const [activeRepo, setActiveRepo] = useState<Repository | null>(null);
   const [activeTab, setActiveTab] = useState<TabType>('summary');
   const [showLanding, setShowLanding] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [isRightPanelOpen, setIsRightPanelOpen] = useState(true);
-  const [selectedFile, setSelectedFile] = useState<string>('SecurityConfig.java');
+  const [selectedFile, setSelectedFile] = useState<string>('');
+  const [targetLineRange, setTargetLineRange] = useState<{ startLine?: number; endLine?: number }>({});
+  const [loadingRepos, setLoadingRepos] = useState(true);
 
   // Modals state
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [uploadInitialTab, setUploadInitialTab] = useState<'zip' | 'github'>('zip');
 
+  // Real Indexing progress polling state
   const [isIndexingModalOpen, setIsIndexingModalOpen] = useState(false);
-  const [indexingSteps, setIndexingSteps] = useState<IndexingStepStatus[]>(INITIAL_INDEXING_STEPS);
+  const [indexingRepoId, setIndexingRepoId] = useState<string | null>(null);
   const [indexingRepoName, setIndexingRepoName] = useState('');
-  const [pendingRepo, setPendingRepo] = useState<Repository | null>(null);
+  const [indexingStage, setIndexingStage] = useState('Pending Ingestion');
+  const [indexingProgress, setIndexingProgress] = useState(0);
+  const [indexingStatus, setIndexingStatus] = useState<string>('PENDING');
+  const [indexingError, setIndexingError] = useState<string | undefined>(undefined);
 
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
 
-  // Trigger simulated indexing process
-  const handleStartIndexingProcess = async (repoSource: string) => {
-    setIndexingRepoName(repoSource);
-    setIndexingSteps(INITIAL_INDEXING_STEPS);
+  // Load repositories from real backend on mount
+  const fetchRepositories = async () => {
+    try {
+      const res = await fetch('/api/repositories');
+      if (res.ok) {
+        const data = await res.json();
+        const repos: Repository[] = (data.repositories || []).map((r: any) => ({
+          id: r.id,
+          name: r.name,
+          fullName: r.full_name,
+          url: r.github_url,
+          primaryLanguage: r.primary_language || 'Code',
+          framework: r.framework || 'Standard',
+          fileCount: r.file_count || 0,
+          folderCount: r.folder_count || 0,
+          estimatedTokens: r.token_count || 0,
+          branch: r.branch || 'main',
+          status: r.status,
+          stage: r.stage,
+          progress: r.progress,
+          lastIndexedAt: new Date(r.updated_at || r.created_at).toLocaleDateString(),
+          stats: r.stats,
+          technologies: r.technologies || [],
+          summary: r.summary || {
+            projectType: 'Repository',
+            architecture: 'Modular',
+            backend: 'Standard',
+            frontend: 'N/A',
+            database: 'N/A',
+            authentication: 'Standard',
+            description: `Repository ${r.name}`,
+            keyPackages: [],
+          },
+          errorMessage: r.error_message,
+        }));
+
+        setRepositories(repos);
+        if (repos.length > 0 && !activeRepo) {
+          const completedRepo = repos.find((r) => r.status === 'COMPLETED') || repos[0];
+          setActiveRepo(completedRepo);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load repositories from API:', err);
+    } finally {
+      setLoadingRepos(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchRepositories();
+  }, []);
+
+  // Poll backend for indexing progress
+  useEffect(() => {
+    if (!indexingRepoId || !isIndexingModalOpen) return;
+
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/repositories/${indexingRepoId}`);
+        if (res.ok) {
+          const data = await res.json();
+          const repo = data.repository;
+          if (repo) {
+            setIndexingStage(repo.stage || 'Processing');
+            setIndexingProgress(repo.progress || 0);
+            setIndexingStatus(repo.status);
+            setIndexingError(repo.error_message);
+
+            if (repo.status === 'COMPLETED') {
+              clearInterval(interval);
+              fetchRepositories();
+            } else if (repo.status === 'FAILED') {
+              clearInterval(interval);
+              fetchRepositories();
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Error polling indexing progress:', err);
+      }
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [indexingRepoId, isIndexingModalOpen]);
+
+  // Handle Real ZIP Upload
+  const handleUploadZip = async (file: File) => {
+    setIndexingRepoName(file.name.replace(/\.zip$/i, ''));
+    setIndexingStage('Uploading ZIP archive...');
+    setIndexingProgress(5);
+    setIndexingStatus('PENDING');
+    setIndexingError(undefined);
     setIsIndexingModalOpen(true);
 
     try {
-      const newRepo = await MockApiService.startIndexing(repoSource, (updatedSteps) => {
-        setIndexingSteps(updatedSteps);
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('name', file.name.replace(/\.zip$/i, ''));
+
+      const res = await fetch('/api/repositories', {
+        method: 'POST',
+        body: formData,
       });
-      setPendingRepo(newRepo);
-    } catch (err) {
-      console.error(err);
+
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || 'Failed to upload repository ZIP');
+      }
+
+      const data = await res.json();
+      setIndexingRepoId(data.id);
+    } catch (err: any) {
+      setIndexingStatus('FAILED');
+      setIndexingError(err?.message || 'Failed to upload repository ZIP.');
+    }
+  };
+
+  // Handle Real GitHub Import
+  const handleImportGithub = async (url: string) => {
+    setIndexingRepoName(url.split('/').pop() || url);
+    setIndexingStage('Connecting to GitHub API...');
+    setIndexingProgress(5);
+    setIndexingStatus('PENDING');
+    setIndexingError(undefined);
+    setIsIndexingModalOpen(true);
+
+    try {
+      const res = await fetch('/api/repositories', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ githubUrl: url }),
+      });
+
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || 'Failed to import GitHub repository');
+      }
+
+      const data = await res.json();
+      setIndexingRepoId(data.id);
+    } catch (err: any) {
+      setIndexingStatus('FAILED');
+      setIndexingError(err?.message || 'Failed to import GitHub repository.');
     }
   };
 
   const handleFinishIndexing = () => {
-    if (pendingRepo) {
-      setRepositories((prev) => [pendingRepo, ...prev]);
-      setActiveRepo(pendingRepo);
-      setPendingRepo(null);
+    if (indexingRepoId) {
+      const found = repositories.find((r) => r.id === indexingRepoId);
+      if (found) {
+        setActiveRepo(found);
+      }
     }
     setIsIndexingModalOpen(false);
     setShowLanding(false);
     setActiveTab('summary');
   };
 
-  const handleSelectFileFromAnywhere = (filename: string) => {
-    const cleanName = filename.split('/').pop() || filename;
-    setSelectedFile(cleanName);
+  const handleSelectFileFromAnywhere = (filename: string, startLine?: number, endLine?: number) => {
+    setSelectedFile(filename);
+    if (startLine && endLine) {
+      setTargetLineRange({ startLine, endLine });
+    } else {
+      setTargetLineRange({});
+    }
     setActiveTab('files');
     setShowLanding(false);
   };
@@ -98,66 +238,43 @@ export default function Home() {
         onSearchChange={setSearchQuery}
         theme={theme}
         onToggleTheme={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
-        onToggleRightPanel={() => setIsRightPanelOpen((o) => !o)}
       />
 
-      {/* Left Sidebar */}
-      <Sidebar
-        activeTab={activeTab}
-        onTabChange={(tab) => {
-          setActiveTab(tab);
-          setShowLanding(false);
-        }}
-        onNewChat={() => {
-          setIsRightPanelOpen(true);
-        }}
-        onOpenUploadModal={() => {
-          setUploadInitialTab('zip');
-          setIsUploadModalOpen(true);
-        }}
-      />
+      {/* Main Workspace Body */}
+      {showLanding ? (
+        /* Landing Showcase View */
+        <main className="flex-1 pt-14 flex flex-col items-center justify-start max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8 space-y-12">
+          <HeroSection
+            onOpenUploadZip={() => {
+              setUploadInitialTab('zip');
+              setIsUploadModalOpen(true);
+            }}
+            onOpenGithubModal={() => {
+              setUploadInitialTab('github');
+              setIsUploadModalOpen(true);
+            }}
+          />
+          <FeatureCards />
+        </main>
+      ) : activeRepo ? (
+        /* Fixed Shell Workspace Layout */
+        <div className="flex-1 flex w-full relative">
+          {/* Left Sidebar Fixed 260px */}
+          <Sidebar
+            activeTab={activeTab}
+            onTabChange={setActiveTab}
+            onOpenUploadModal={() => {
+              setUploadInitialTab('zip');
+              setIsUploadModalOpen(true);
+            }}
+            onNewChat={() => {
+              setIsRightPanelOpen(true);
+            }}
+          />
 
-      {/* Main Workspace Frame (Matches Stitch pl-[260px] pr-[320px] pt-14) */}
-      <div
-        className={`flex min-h-screen pt-14 transition-all duration-200 ${
-          showLanding
-            ? 'pl-[260px] pr-0'
-            : `pl-[260px] ${isRightPanelOpen ? 'pr-[320px]' : 'pr-0'}`
-        }`}
-      >
-        <main className="flex-1 p-6 overflow-y-auto">
-          {showLanding ? (
-            /* LANDING PAGE VIEW */
-            <div className="space-y-8 animate-in fade-in duration-200 max-w-6xl mx-auto">
-              <HeroSection
-                onOpenUploadZip={() => {
-                  setUploadInitialTab('zip');
-                  setIsUploadModalOpen(true);
-                }}
-                onOpenUploadGithub={() => {
-                  setUploadInitialTab('github');
-                  setIsUploadModalOpen(true);
-                }}
-                onSelectSampleRepo={(repo) => {
-                  setActiveRepo(repo);
-                  setShowLanding(false);
-                  setActiveTab('summary');
-                }}
-              />
-              <FeatureCards />
-            </div>
-          ) : !activeRepo ? (
-            /* EMPTY STATE VIEW */
-            <EmptyState
-              onOpenUpload={() => {
-                setUploadInitialTab('zip');
-                setIsUploadModalOpen(true);
-              }}
-            />
-          ) : (
-            /* ACTIVE WORKSPACE TABS */
-            <div className="w-full">
-              {/* TAB: SUMMARY */}
+          {/* Center Scrollable Content with fixed left and right padding */}
+          <main className="flex-1 min-w-0 pl-[260px] pr-[320px] pt-14 flex flex-col items-center">
+            <div className="w-full max-w-5xl px-6 py-7">
               {activeTab === 'summary' && (
                 <RepositorySummaryView
                   repo={activeRepo}
@@ -167,7 +284,6 @@ export default function Home() {
                 />
               )}
 
-              {/* TAB: GRAPH */}
               {activeTab === 'graph' && (
                 <DependencyGraphView
                   repo={activeRepo}
@@ -176,17 +292,16 @@ export default function Home() {
                 />
               )}
 
-              {/* TAB: FILES */}
               {activeTab === 'files' && (
                 <FileExplorerView
                   repo={activeRepo}
                   selectedFile={selectedFile}
-                  onFileSelect={(file) => setSelectedFile(file)}
+                  targetLineRange={targetLineRange}
+                  onFileSelect={handleSelectFileFromAnywhere}
                   onAskAi={handleAskAiFromAnywhere}
                 />
               )}
 
-              {/* TAB: ANALYSIS */}
               {activeTab === 'analysis' && (
                 <AnalysisView
                   repo={activeRepo}
@@ -194,70 +309,64 @@ export default function Home() {
                 />
               )}
 
-              {/* TAB: SETTINGS */}
               {activeTab === 'settings' && (
-                <div className="max-w-3xl mx-auto space-y-6 animate-in fade-in duration-200">
-                  <div className="flex flex-col gap-1">
-                    <h1 className="text-2xl font-heading font-semibold text-[#e3e2e6]">Settings</h1>
-                    <p className="text-xs text-[#cac5ce]">Manage repository parsing & AI preferences</p>
-                  </div>
-
-                  <div className="p-6 bg-[#1a1b1e] border border-[#48454d]/30 rounded-2xl space-y-4">
-                    <h3 className="text-sm font-heading font-semibold text-[#e3e2e6]">
-                      Vector Engine Configuration
-                    </h3>
-                    <div className="space-y-3 text-xs text-[#cac5ce]">
-                      <div className="flex items-center justify-between p-3 bg-[#1f1f23] rounded-xl border border-[#48454d]/20">
-                        <div>
-                          <span className="font-medium text-[#e3e2e6] block">Embedding Model</span>
-                          <span className="text-[#938f98]">text-embedding-3-small (1536 dims)</span>
-                        </div>
-                        <span className="px-2.5 py-1 rounded bg-[#fbcfe8]/10 text-[#fbcfe8] text-[11px] font-mono">
-                          Active
-                        </span>
-                      </div>
-
-                      <div className="flex items-center justify-between p-3 bg-[#1f1f23] rounded-xl border border-[#48454d]/20">
-                        <div>
-                          <span className="font-medium text-[#e3e2e6] block">AST Chunking Strategy</span>
-                          <span className="text-[#938f98]">Semantic Class & Method Boundaries</span>
-                        </div>
-                        <span className="px-2.5 py-1 rounded bg-emerald-500/10 text-emerald-400 text-[11px] font-mono">
-                          Optimal
-                        </span>
-                      </div>
+                <div className="space-y-6 max-w-2xl">
+                  <h1 className="text-xl font-heading font-semibold text-[#e3e2e6]">Settings</h1>
+                  <div className="p-4 rounded-xl bg-[#1a1b1e] border border-[#48454d]/25 space-y-3">
+                    <span className="font-semibold text-xs text-[#e3e2e6] block">Database & Vector Storage</span>
+                    <p className="text-xs text-[#938f98]">
+                      Connected to PostgreSQL + pgvector at <span className="font-mono text-[#fbcfe8]">localhost:5432/codegraph</span>
+                    </p>
+                    <div className="pt-2">
+                      <span className="text-[11px] font-mono text-[#b7c8e1] bg-[#121316] px-2.5 py-1 rounded border border-[#48454d]/20 inline-block">
+                        Model: OpenAI text-embedding-3-small (1536 dims)
+                      </span>
                     </div>
                   </div>
                 </div>
               )}
             </div>
-          )}
-        </main>
+          </main>
 
-        {/* Right AI Assistant Panel */}
-        {!showLanding && activeRepo && (
+          {/* Right Assistant Panel Fixed 320px */}
           <RightPanel
             activeRepo={activeRepo}
             isOpen={isRightPanelOpen}
             onClose={() => setIsRightPanelOpen(false)}
             onSelectFile={handleSelectFileFromAnywhere}
           />
-        )}
-      </div>
+        </div>
+      ) : (
+        /* Empty State when no repository is indexed */
+        <main className="flex-1 pt-14 flex items-center justify-center p-6">
+          <EmptyState
+            onOpenUpload={() => {
+              setUploadInitialTab('zip');
+              setIsUploadModalOpen(true);
+            }}
+          />
+        </main>
+      )}
 
-      {/* Upload & Indexing Modals */}
+      {/* Upload Modal (ZIP & GitHub) */}
       <UploadModal
         isOpen={isUploadModalOpen}
         onClose={() => setIsUploadModalOpen(false)}
-        onStartProcess={handleStartIndexingProcess}
+        onUploadZip={handleUploadZip}
+        onImportGithub={handleImportGithub}
         initialTab={uploadInitialTab}
       />
 
+      {/* Indexing Progress Modal */}
       <IndexingProgressModal
         isOpen={isIndexingModalOpen}
-        steps={indexingSteps}
         repoName={indexingRepoName}
+        stage={indexingStage}
+        progress={indexingProgress}
+        status={indexingStatus}
+        errorMessage={indexingError}
         onFinish={handleFinishIndexing}
+        onClose={() => setIsIndexingModalOpen(false)}
       />
     </div>
   );

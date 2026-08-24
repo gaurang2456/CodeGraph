@@ -1,14 +1,13 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Repository, ChatMessage as ChatMessageType } from '@/types';
-import { MockApiService } from '@/services/mockApi';
+import { Repository, ChatMessage as ChatMessageType, FileCitation } from '@/types';
 
 export interface RightPanelProps {
   activeRepo: Repository;
   isOpen: boolean;
   onClose: () => void;
-  onSelectFile?: (filename: string) => void;
+  onSelectFile?: (filename: string, startLine?: number, endLine?: number) => void;
 }
 
 export const RightPanel: React.FC<RightPanelProps> = ({
@@ -17,31 +16,43 @@ export const RightPanel: React.FC<RightPanelProps> = ({
   onClose,
   onSelectFile
 }) => {
-  const [messages, setMessages] = useState<ChatMessageType[]>([
-    {
-      id: 'msg-user-1',
-      sender: 'user',
-      content: 'How can I add Google OAuth to this project?',
-      timestamp: '2 mins ago'
-    },
-    {
-      id: 'msg-assistant-1',
-      sender: 'assistant',
-      content: 'Your application already uses Spring Security and JWT authentication. The cleanest approach is to add Google OAuth2 alongside the existing authentication flow.',
-      timestamp: 'Just now',
-      confidenceScore: 0.98,
-      implementationPlan: [
-        { step: 1, title: 'Add dependencies', targetFile: 'pom.xml' },
-        { step: 2, title: 'Configure Google OAuth', targetFile: 'application.yml' },
-        { step: 3, title: 'OAuth success handler', targetFile: 'SecurityConfig.java' },
-        { step: 4, title: 'Update security config', targetFile: 'SecurityConfig.java' },
-        { step: 5, title: 'Handle user persistence', targetFile: 'AuthService.java' }
-      ]
-    }
-  ]);
+  const [messages, setMessages] = useState<ChatMessageType[]>([]);
   const [inputQuery, setInputQuery] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Load chat history for active repository
+  useEffect(() => {
+    let isMounted = true;
+    async function loadHistory() {
+      if (!activeRepo?.id) return;
+      try {
+        const res = await fetch(`/api/repositories/${activeRepo.id}/chat`);
+        if (res.ok) {
+          const data = await res.json();
+          if (isMounted && data.messages) {
+            setMessages(
+              data.messages.map((m: any) => ({
+                id: m.id,
+                sender: m.sender,
+                content: m.content,
+                timestamp: new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                citations: typeof m.citations === 'string' ? JSON.parse(m.citations) : m.citations,
+                confidenceScore: m.confidence_score,
+              }))
+            );
+          }
+        }
+      } catch (err) {
+        console.error('Failed to load chat history:', err);
+      }
+    }
+
+    loadHistory();
+    return () => {
+      isMounted = false;
+    };
+  }, [activeRepo?.id]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
@@ -49,7 +60,7 @@ export const RightPanel: React.FC<RightPanelProps> = ({
 
   const handleSend = async (textToSend?: string) => {
     const text = (textToSend || inputQuery).trim();
-    if (!text || isGenerating) return;
+    if (!text || isGenerating || !activeRepo?.id) return;
 
     const userMsg: ChatMessageType = {
       id: `user-${Date.now()}`,
@@ -58,160 +69,206 @@ export const RightPanel: React.FC<RightPanelProps> = ({
       timestamp: 'Just now'
     };
 
-    setInputQuery('');
     setMessages((prev) => [...prev, userMsg]);
+    setInputQuery('');
     setIsGenerating(true);
 
-    const assistantMsgId = `assistant-${Date.now()}`;
-    const initialAssistantMsg: ChatMessageType = {
-      id: assistantMsgId,
-      sender: 'assistant',
-      content: '',
-      timestamp: 'Just now',
-      isStreaming: true
-    };
-
-    setMessages((prev) => [...prev, initialAssistantMsg]);
-
     try {
-      const result = await MockApiService.streamChatResponse(text, (chunk) => {
-        setMessages((prev) =>
-          prev.map((msg) => (msg.id === assistantMsgId ? { ...msg, content: chunk } : msg))
-        );
+      const res = await fetch(`/api/repositories/${activeRepo.id}/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: text }),
       });
 
-      setMessages((prev) =>
-        prev.map((msg) =>
-          msg.id === assistantMsgId
-            ? {
-                ...msg,
-                content: result.answer,
-                citations: result.citations,
-                confidenceScore: result.confidenceScore,
-                implementationPlan: result.implementationPlan,
-                isStreaming: false
-              }
-            : msg
-        )
-      );
-    } catch (err) {
-      console.error(err);
-      setMessages((prev) =>
-        prev.map((msg) =>
-          msg.id === assistantMsgId
-            ? {
-                ...msg,
-                content: 'Failed to process question. Please try again.',
-                isStreaming: false
-              }
-            : msg
-        )
-      );
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || 'Failed to get response from AI');
+      }
+
+      const data = await res.json();
+      const assistantMsg: ChatMessageType = {
+        id: `ai-${Date.now()}`,
+        sender: 'assistant',
+        content: data.answer,
+        timestamp: 'Just now',
+        confidenceScore: data.confidenceScore || 0.95,
+        citations: data.citations || [],
+        implementationPlan: data.implementationPlan,
+      };
+
+      setMessages((prev) => [...prev, assistantMsg]);
+    } catch (err: any) {
+      console.error('Chat error:', err);
+      const errorMsg: ChatMessageType = {
+        id: `err-${Date.now()}`,
+        sender: 'assistant',
+        content: `Error: ${err?.message || 'Failed to process request. Please ensure OPENAI_API_KEY is configured in .env.local and database is connected.'}`,
+        timestamp: 'Just now',
+      };
+      setMessages((prev) => [...prev, errorMsg]);
     } finally {
       setIsGenerating(false);
     }
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
+  const handleCitationClick = (citation: FileCitation) => {
+    if (onSelectFile) {
+      onSelectFile(citation.path || citation.filename, citation.startLine, citation.endLine);
     }
   };
 
   if (!isOpen) return null;
 
   return (
-    <aside className="fixed right-0 top-14 bottom-0 w-[320px] bg-[#0c0e11] border-l border-[#48454d]/20 flex flex-col z-40">
+    <aside className="fixed right-0 top-14 bottom-0 w-[320px] bg-[#1a1b1e] border-l border-[#48454d]/25 z-40 flex flex-col shadow-2xl">
       {/* Header */}
-      <div className="p-4 border-b border-[#48454d]/10 flex items-center justify-between">
-        <span className="text-sm font-heading font-semibold text-[#e3e2e6]">AI Assistant</span>
-        <span
+      <div className="p-3.5 border-b border-[#48454d]/20 flex items-center justify-between bg-[#1f1f23]/60">
+        <div className="flex items-center gap-2">
+          <div className="w-6 h-6 rounded-lg bg-[#fbcfe8]/10 text-[#fbcfe8] flex items-center justify-center">
+            <span className="material-symbols-outlined text-[16px]">smart_toy</span>
+          </div>
+          <span className="font-heading font-semibold text-xs text-[#e3e2e6]">AI Assistant</span>
+          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[#292a2d] text-[#b7c8e1]">
+            RAG Active
+          </span>
+        </div>
+        <button
           onClick={onClose}
-          className="material-symbols-outlined text-[#cac5ce] hover:text-white cursor-pointer text-[18px]"
+          className="text-[#938f98] hover:text-[#e3e2e6] transition-colors p-1 rounded-md hover:bg-[#292a2d]"
         >
-          close
-        </span>
+          <span className="material-symbols-outlined text-[16px]">close</span>
+        </button>
       </div>
 
-      {/* Chat Messages */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 flex flex-col gap-4">
-        {messages.length === 0 ? (
-          <div className="text-xs text-[#938f98] italic text-center py-10">
-            No active conversation. Start a new chat to analyze your code.
-          </div>
-        ) : (
-          messages.map((msg) => (
-            <div key={msg.id} className="w-full">
-              {msg.sender === 'user' ? (
-                /* User Message */
-                <div className="flex flex-col gap-1 items-end">
-                  <div className="bg-[#292a2d] text-[#e3e2e6] px-4 py-3 rounded-2xl rounded-tr-sm text-xs leading-relaxed shadow-sm max-w-[90%]">
-                    {msg.content}
-                  </div>
-                </div>
-              ) : (
-                /* AI Message */
-                <div className="flex flex-col gap-3 items-start animate-in fade-in duration-200">
-                  <div className="flex items-center gap-2 text-[#fbcfe8] text-[11px] font-mono uppercase tracking-widest">
-                    <span className="material-symbols-outlined text-[16px]">smart_toy</span>
-                    CodeGraph AI
-                  </div>
-                  <div className="text-[#cac5ce] text-xs leading-relaxed">
-                    {msg.content || (msg.isStreaming && <span className="animate-pulse">Thinking...</span>)}
-                  </div>
-
-                  {/* Implementation Plan Step Buttons */}
-                  {msg.implementationPlan && msg.implementationPlan.length > 0 && (
-                    <div className="w-full flex flex-col gap-2 mt-1">
-                      <div className="text-xs font-heading font-semibold text-[#e3e2e6]">
-                        Implementation Plan
-                      </div>
-                      <div className="flex flex-col gap-1.5 w-full">
-                        {msg.implementationPlan.map((step) => (
-                          <button
-                            key={step.step}
-                            onClick={() => onSelectFile && onSelectFile(step.targetFile)}
-                            className="flex items-center gap-3 w-full text-left px-3 py-2.5 bg-[#1f1f23] shadow-sm hover:bg-[#292a2d] transition-colors rounded-xl group cursor-pointer border border-[#48454d]/20"
-                          >
-                            <div className="w-5 h-5 rounded-full bg-[#fbcfe8]/10 text-[#fbcfe8] flex items-center justify-center text-[10px] font-mono font-medium shrink-0">
-                              {step.step}
-                            </div>
-                            <div className="flex-1 text-xs text-[#e3e2e6] truncate font-medium">
-                              {step.title}
-                            </div>
-                            <div className="text-[10px] font-mono text-[#938f98] opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-                              {step.targetFile}
-                            </div>
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
+      {/* Messages Stream */}
+      <div ref={scrollRef} className="flex-1 overflow-y-auto p-3.5 space-y-4">
+        {messages.length === 0 && (
+          <div className="py-8 text-center space-y-2">
+            <div className="w-10 h-10 rounded-full bg-[#292a2d] text-[#fbcfe8] flex items-center justify-center mx-auto mb-2">
+              <span className="material-symbols-outlined text-[20px]">chat</span>
             </div>
-          ))
+            <p className="text-xs text-[#e3e2e6] font-medium">Ask anything about {activeRepo.name}</p>
+            <p className="text-[11px] text-[#938f98]">
+              Answers are generated using semantic embeddings and pgvector similarity search.
+            </p>
+          </div>
+        )}
+
+        {messages.map((msg) => (
+          <div key={msg.id} className="space-y-2 animate-in fade-in duration-200">
+            {msg.sender === 'user' ? (
+              <div className="bg-[#292a2d] text-[#e3e2e6] p-2.5 rounded-xl rounded-tr-none text-xs ml-4 border border-[#48454d]/20">
+                {msg.content}
+              </div>
+            ) : (
+              <div className="space-y-2.5">
+                <div className="flex items-center gap-1.5 text-[10px] font-mono text-[#fbcfe8] uppercase tracking-wider">
+                  <span className="material-symbols-outlined text-[14px]">terminal</span>
+                  <span>CodeGraph AI</span>
+                </div>
+
+                <div className="text-xs text-[#e3e2e6] leading-relaxed bg-[#111316]/50 p-2.5 rounded-xl border border-[#48454d]/15 whitespace-pre-wrap">
+                  {msg.content}
+                </div>
+
+                {/* Real Citations */}
+                {msg.citations && msg.citations.length > 0 && (
+                  <div className="space-y-1.5 pt-1">
+                    <span className="text-[10px] font-mono text-[#938f98] uppercase tracking-wider flex items-center gap-1">
+                      <span className="material-symbols-outlined text-[12px]">link</span>
+                      Verified Sources:
+                    </span>
+                    <div className="space-y-1">
+                      {msg.citations.map((c, i) => (
+                        <div
+                          key={i}
+                          onClick={() => handleCitationClick(c)}
+                          className="p-2 bg-[#1f1f23] hover:bg-[#292a2d] border border-[#48454d]/20 rounded-lg text-xs flex flex-col gap-0.5 cursor-pointer transition-colors group"
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="font-mono text-[#fbcfe8] text-[11px] group-hover:underline truncate">
+                              {c.filename}
+                            </span>
+                            <span className="text-[10px] font-mono text-[#b7c8e1] bg-[#111316] px-1.5 py-0.5 rounded">
+                              {c.lineRange || (c.startLine ? `L${c.startLine}-L${c.endLine}` : 'ref')}
+                            </span>
+                          </div>
+                          {c.snippet && (
+                            <p className="text-[10px] text-[#938f98] font-mono line-clamp-1 truncate">
+                              {c.snippet}
+                            </p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Implementation Plan */}
+                {msg.implementationPlan && msg.implementationPlan.length > 0 && (
+                  <div className="space-y-2 pt-2 border-t border-[#48454d]/20">
+                    <span className="text-xs font-semibold text-[#e3e2e6] flex items-center gap-1">
+                      <span className="material-symbols-outlined text-[#fbcfe8] text-[14px]">task_alt</span>
+                      Implementation Plan
+                    </span>
+                    <div className="space-y-1.5">
+                      {msg.implementationPlan.map((step) => (
+                        <div
+                          key={step.step}
+                          onClick={() => onSelectFile && onSelectFile(step.targetFile)}
+                          className="p-2 bg-[#1f1f23] hover:bg-[#292a2d] border border-[#48454d]/20 rounded-lg text-xs flex items-center justify-between cursor-pointer transition-colors group"
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="w-4 h-4 rounded-full bg-[#292a2d] text-[#fbcfe8] text-[10px] font-mono flex items-center justify-center font-bold">
+                              {step.step}
+                            </span>
+                            <span className="text-xs text-[#cac5ce] group-hover:text-white truncate max-w-[180px]">
+                              {step.title}
+                            </span>
+                          </div>
+                          <span className="text-[10px] font-mono text-[#938f98] group-hover:text-[#fbcfe8]">
+                            {step.targetFile.split('/').pop()}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        ))}
+
+        {isGenerating && (
+          <div className="flex items-center gap-2 text-xs text-[#fbcfe8] font-mono p-2 bg-[#1f1f23] rounded-lg animate-pulse">
+            <span className="material-symbols-outlined text-[16px] animate-spin">progress_activity</span>
+            Retrieving chunks & generating response...
+          </div>
         )}
       </div>
 
-      {/* Input Area */}
-      <div className="p-4 bg-[#1f1f23] border-t border-[#48454d]/20">
+      {/* Input Bar */}
+      <div className="p-3 border-t border-[#48454d]/20 bg-[#1a1b1e]">
         <div className="relative flex items-center">
           <textarea
+            rows={2}
             value={inputQuery}
             onChange={(e) => setInputQuery(e.target.value)}
-            onKeyDown={handleKeyDown}
-            rows={2}
-            className="w-full bg-[#121316] border border-[#48454d]/30 rounded-xl p-3 pr-12 text-xs text-[#e3e2e6] placeholder:text-[#938f98] resize-none focus:outline-none focus:border-[#fbcfe8]/50"
-            placeholder="Ask anything..."
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                handleSend();
+              }
+            }}
+            placeholder="Ask anything about architecture, classes, auth, endpoints..."
+            className="w-full bg-[#121316] border border-[#48454d]/30 focus:border-[#fbcfe8]/60 rounded-xl p-2.5 pr-10 text-xs text-[#e3e2e6] placeholder:text-[#938f98] outline-none resize-none transition-colors"
           />
           <button
             onClick={() => handleSend()}
             disabled={!inputQuery.trim() || isGenerating}
-            className="absolute right-3 p-1.5 bg-[#fbcfe8] text-[#3d1729] rounded-lg hover:bg-[#f9a8d4] disabled:opacity-40 transition-colors cursor-pointer"
+            className="absolute right-2.5 bottom-2.5 p-1.5 bg-[#fbcfe8] text-[#3d1729] rounded-lg disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[#f9a8d4] transition-colors cursor-pointer"
           >
-            <span className="material-symbols-outlined text-[18px]">send</span>
+            <span className="material-symbols-outlined text-[16px]">send</span>
           </button>
         </div>
       </div>

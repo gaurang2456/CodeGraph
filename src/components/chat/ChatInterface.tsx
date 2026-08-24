@@ -5,7 +5,6 @@ import { Repository, ChatMessage as ChatMessageType, FileCitation } from '@/type
 import { ChatMessage } from './ChatMessage';
 import { PromptSuggestions } from './PromptSuggestions';
 import { FileViewerModal } from './FileViewerModal';
-import { MockApiService } from '@/services/mockApi';
 import { Button } from '@/components/ui/Button';
 import { Send, Sparkles, MessageSquareCode, Trash2, Bot } from 'lucide-react';
 
@@ -14,15 +13,7 @@ export interface ChatInterfaceProps {
 }
 
 export const ChatInterface: React.FC<ChatInterfaceProps> = ({ activeRepo }) => {
-  const [messages, setMessages] = useState<ChatMessageType[]>([
-    {
-      id: 'welcome-1',
-      sender: 'assistant',
-      content: `Hello! I have indexed **${activeRepo.name}**. You can ask me anything about its architecture, authentication flow, database schemas, REST endpoints, or business logic.`,
-      timestamp: 'Just now',
-      confidenceScore: 0.99
-    }
-  ]);
+  const [messages, setMessages] = useState<ChatMessageType[]>([]);
   const [inputQuery, setInputQuery] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [selectedCitation, setSelectedCitation] = useState<FileCitation | null>(null);
@@ -34,170 +25,213 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({ activeRepo }) => {
   };
 
   useEffect(() => {
+    let isMounted = true;
+    async function loadHistory() {
+      if (!activeRepo?.id) return;
+      try {
+        const res = await fetch(`/api/repositories/${activeRepo.id}/chat`);
+        if (res.ok) {
+          const data = await res.json();
+          if (isMounted && data.messages && data.messages.length > 0) {
+            setMessages(
+              data.messages.map((m: any) => ({
+                id: m.id,
+                sender: m.sender,
+                content: m.content,
+                timestamp: new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                citations: typeof m.citations === 'string' ? JSON.parse(m.citations) : m.citations,
+                confidenceScore: m.confidence_score,
+              }))
+            );
+          } else if (isMounted) {
+            setMessages([
+              {
+                id: 'welcome-1',
+                sender: 'assistant',
+                content: `Hello! I have indexed **${activeRepo.name}**. You can ask me anything about its architecture, authentication flow, database schemas, REST endpoints, or business logic.`,
+                timestamp: 'Just now',
+                confidenceScore: 0.99
+              }
+            ]);
+          }
+        }
+      } catch (err) {
+        console.error('Failed to load chat history:', err);
+      }
+    }
+
+    loadHistory();
+    return () => {
+      isMounted = false;
+    };
+  }, [activeRepo?.id, activeRepo?.name]);
+
+  useEffect(() => {
     scrollToBottom();
   }, [messages]);
 
   const handleSendQuery = async (queryText?: string) => {
-    const query = queryText || inputQuery;
-    if (!query.trim() || isGenerating) return;
+    const text = (queryText || inputQuery).trim();
+    if (!text || isGenerating || !activeRepo?.id) return;
 
-    const userMsgId = `msg-user-${Date.now()}`;
-    const userMsg: ChatMessageType = {
-      id: userMsgId,
+    const userMessageId = `user-${Date.now()}`;
+    const userMessage: ChatMessageType = {
+      id: userMessageId,
       sender: 'user',
-      content: query.trim(),
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      content: text,
+      timestamp: 'Just now'
     };
 
+    setMessages((prev) => [...prev, userMessage]);
     setInputQuery('');
-    setMessages((prev) => [...prev, userMsg]);
     setIsGenerating(true);
 
-    const assistantMsgId = `msg-assistant-${Date.now()}`;
-    const initialAssistantMsg: ChatMessageType = {
-      id: assistantMsgId,
-      sender: 'assistant',
-      content: '',
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      isStreaming: true
-    };
-
-    setMessages((prev) => [...prev, initialAssistantMsg]);
-
     try {
-      const result = await MockApiService.streamChatResponse(query, (streamedText) => {
-        setMessages((prev) =>
-          prev.map((msg) =>
-            msg.id === assistantMsgId
-              ? { ...msg, content: streamedText }
-              : msg
-          )
-        );
+      const res = await fetch(`/api/repositories/${activeRepo.id}/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: text }),
       });
 
-      setMessages((prev) =>
-        prev.map((msg) =>
-          msg.id === assistantMsgId
-            ? {
-                ...msg,
-                content: result.answer,
-                citations: result.citations,
-                confidenceScore: result.confidenceScore,
-                isStreaming: false
-              }
-            : msg
-        )
-      );
-    } catch (err) {
-      setMessages((prev) =>
-        prev.map((msg) =>
-          msg.id === assistantMsgId
-            ? {
-                ...msg,
-                content: 'Sorry, an error occurred while processing your question.',
-                isStreaming: false
-              }
-            : msg
-        )
-      );
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || 'Failed to get response from AI');
+      }
+
+      const data = await res.json();
+      const assistantMessage: ChatMessageType = {
+        id: `assistant-${Date.now()}`,
+        sender: 'assistant',
+        content: data.answer,
+        timestamp: 'Just now',
+        citations: data.citations || [],
+        confidenceScore: data.confidenceScore || 0.95,
+        implementationPlan: data.implementationPlan
+      };
+
+      setMessages((prev) => [...prev, assistantMessage]);
+    } catch (err: any) {
+      console.error('Chat query error:', err);
+      const errorMsg: ChatMessageType = {
+        id: `err-${Date.now()}`,
+        sender: 'assistant',
+        content: `Error: ${err?.message || 'Failed to query RAG engine.'}`,
+        timestamp: 'Just now',
+      };
+      setMessages((prev) => [...prev, errorMsg]);
     } finally {
       setIsGenerating(false);
     }
   };
 
+  const handleClearHistory = () => {
+    setMessages([
+      {
+        id: `welcome-${Date.now()}`,
+        sender: 'assistant',
+        content: `Chat history cleared. What would you like to explore in **${activeRepo.name}**?`,
+        timestamp: 'Just now',
+        confidenceScore: 0.99
+      }
+    ]);
+  };
+
   return (
-    <div className="flex flex-col h-[calc(100vh-8.5rem)] glass-panel rounded-2xl border border-slate-800/80 overflow-hidden shadow-2xl">
-      {/* Chat Header */}
-      <div className="flex items-center justify-between px-6 py-3.5 border-b border-slate-800/80 bg-slate-950/60 shrink-0">
+    <div className="flex flex-col h-[calc(100vh-8rem)] min-h-[500px] rounded-2xl bg-[#111316] border border-[#48454d]/30 shadow-2xl overflow-hidden">
+      {/* Chat header */}
+      <div className="flex items-center justify-between px-5 py-3.5 border-b border-[#48454d]/20 bg-[#1a1b1e]">
         <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-lg bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400">
+          <div className="w-8 h-8 rounded-xl bg-[#292a2d] border border-[#fbcfe8]/20 flex items-center justify-center text-[#fbcfe8]">
             <Bot className="w-4 h-4" />
           </div>
           <div>
-            <h3 className="text-sm font-semibold text-white font-mono flex items-center gap-2">
-              Codebase RAG Chat
-              <span className="text-[10px] px-1.5 py-0.2 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                Vector Graph Active
+            <h3 className="text-sm font-semibold text-[#e3e2e6] flex items-center gap-2">
+              CodeGraph AI Assistant
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-[#fbcfe8]/10 text-[#fbcfe8] border border-[#fbcfe8]/20">
+                {activeRepo.name}
               </span>
             </h3>
-            <p className="text-[11px] text-slate-400">Querying repository: {activeRepo.name}</p>
+            <p className="text-[11px] text-[#938f98]">Vector RAG • OpenAI embeddings • pgvector</p>
           </div>
         </div>
 
         <Button
           variant="ghost"
           size="sm"
-          onClick={() =>
-            setMessages([
-              {
-                id: 'welcome-reset',
-                sender: 'assistant',
-                content: `Chat history cleared. How can I assist you with **${activeRepo.name}**?`,
-                timestamp: 'Just now'
-              }
-            ])
-          }
-          leftIcon={<Trash2 className="w-3.5 h-3.5 text-slate-500" />}
-          className="text-xs text-slate-400 hover:text-red-400"
+          onClick={handleClearHistory}
+          className="text-[#938f98] hover:text-[#e3e2e6]"
         >
-          Clear Chat
+          <Trash2 className="w-4 h-4" />
         </Button>
       </div>
 
       {/* Messages Scroll Area */}
-      <div className="flex-1 p-6 overflow-y-auto space-y-4">
-        {messages.map((msg) => (
+      <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
+        {messages.map((message) => (
           <ChatMessage
-            key={msg.id}
-            message={msg}
-            onCitationClick={(citation) => setSelectedCitation(citation)}
+            key={message.id}
+            message={message}
+            onCitationClick={(citation: FileCitation) => setSelectedCitation(citation)}
           />
         ))}
+
+        {isGenerating && (
+          <div className="flex items-center gap-3 text-xs text-[#fbcfe8] font-mono p-3 rounded-xl bg-[#1f1f23] w-fit border border-[#48454d]/20 animate-pulse">
+            <span className="material-symbols-outlined text-[16px] animate-spin">progress_activity</span>
+            <span>Retrieving code chunks & analyzing architecture...</span>
+          </div>
+        )}
 
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input & Prompt Suggestions Bar */}
-      <div className="p-4 border-t border-slate-800/80 bg-slate-950/80 space-y-3 shrink-0">
-        {activeRepo.sampleQuestions && activeRepo.sampleQuestions.length > 0 && (
+      {/* Prompt Suggestions */}
+      {messages.length <= 2 && (
+        <div className="px-5 pb-2">
           <PromptSuggestions
-            suggestions={activeRepo.sampleQuestions}
-            onSelectSuggestion={(q) => handleSendQuery(q)}
+            suggestions={[
+              'Where is authentication implemented and how does it work?',
+              'Explain how data access and database repositories are structured',
+              'What REST endpoints are exposed in this codebase?',
+              'Explain the core service business logic',
+            ]}
+            onSelectSuggestion={(text: string) => handleSendQuery(text)}
           />
-        )}
+        </div>
+      )}
 
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            handleSendQuery();
-          }}
-          className="flex items-center gap-2"
-        >
-          <div className="relative flex-1">
-            <input
-              type="text"
-              value={inputQuery}
-              onChange={(e) => setInputQuery(e.target.value)}
-              placeholder="Ask anything about this repository..."
-              disabled={isGenerating}
-              className="w-full px-4 py-3 rounded-xl bg-slate-900 border border-slate-800 text-xs sm:text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30 focus:border-slate-700 transition-all font-sans"
-            />
+      {/* Input Box */}
+      <div className="p-4 border-t border-[#48454d]/20 bg-[#1a1b1e]">
+        <div className="relative flex items-center">
+          <input
+            type="text"
+            value={inputQuery}
+            onChange={(e) => setInputQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                handleSendQuery();
+              }
+            }}
+            placeholder={`Ask a question about ${activeRepo.name} source code...`}
+            className="w-full bg-[#121316] border border-[#48454d]/30 focus:border-[#fbcfe8]/60 rounded-xl py-3 pl-4 pr-24 text-xs sm:text-sm text-[#e3e2e6] placeholder:text-[#938f98] outline-none transition-colors"
+          />
+
+          <div className="absolute right-2 flex items-center gap-1">
+            <Button
+              variant="primary"
+              size="sm"
+              disabled={!inputQuery.trim() || isGenerating}
+              onClick={() => handleSendQuery()}
+              className="py-1.5 px-3 shadow-md"
+            >
+              <Send className="w-3.5 h-3.5" />
+            </Button>
           </div>
-
-          <Button
-            type="submit"
-            variant="primary"
-            disabled={!inputQuery.trim() || isGenerating}
-            isLoading={isGenerating}
-            rightIcon={<Send className="w-4 h-4" />}
-            className="h-11 px-5"
-          >
-            Send
-          </Button>
-        </form>
+        </div>
       </div>
 
-      {/* Citation Inspector Modal */}
+      {/* Citation File Viewer Modal */}
       <FileViewerModal
         citation={selectedCitation}
         onClose={() => setSelectedCitation(null)}

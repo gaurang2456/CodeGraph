@@ -5,43 +5,60 @@ import confetti from 'canvas-confetti';
 import { Dialog } from '@/components/ui/Dialog';
 import { Progress } from '@/components/ui/Progress';
 import { Button } from '@/components/ui/Button';
-import { IndexingStepStatus } from '@/types';
 
 export interface IndexingProgressModalProps {
   isOpen: boolean;
-  steps: IndexingStepStatus[];
   repoName: string;
+  stage: string;
+  progress: number;
+  status: 'PENDING' | 'DOWNLOADING' | 'EXTRACTING' | 'SCANNING' | 'PARSING' | 'CHUNKING' | 'EMBEDDING' | 'COMPLETED' | 'FAILED' | string;
+  errorMessage?: string;
   onFinish: () => void;
+  onClose?: () => void;
 }
+
+const STAGES = [
+  { key: 'EXTRACTING', label: 'Extracting Repository', detail: 'Decompressing archive and scanning file trees' },
+  { key: 'SCANNING', label: 'Scanning Codebase', detail: 'Filtering binaries, detecting languages, storing files' },
+  { key: 'PARSING', label: 'AST & Symbol Parsing', detail: 'Parsing class declarations, functions, and endpoints' },
+  { key: 'CHUNKING', label: 'Semantic Code Chunking', detail: 'Creating contextual chunk units with exact line ranges' },
+  { key: 'EMBEDDING', label: 'Vector Embedding Generation', detail: 'Generating 1536-dim embeddings and storing in Supabase pgvector' },
+  { key: 'COMPLETED', label: 'Finalizing Summary', detail: 'Synthesizing evidence-based repository architecture overview' },
+];
 
 export const IndexingProgressModal: React.FC<IndexingProgressModalProps> = ({
   isOpen,
-  steps,
   repoName,
-  onFinish
+  stage,
+  progress,
+  status,
+  errorMessage,
+  onFinish,
+  onClose,
 }) => {
-  const completedCount = steps.filter((s) => s.status === 'completed').length;
-  const totalSteps = steps.length;
-  const overallPercentage = Math.round((completedCount / totalSteps) * 100);
-  const isAllDone = completedCount === totalSteps;
+  const isCompleted = status === 'COMPLETED';
+  const isFailed = status === 'FAILED';
 
   useEffect(() => {
-    if (isAllDone && isOpen) {
+    if (isCompleted && isOpen) {
       confetti({
         particleCount: 80,
         spread: 70,
         origin: { y: 0.6 }
       });
     }
-  }, [isAllDone, isOpen]);
+  }, [isCompleted, isOpen]);
 
   if (!isOpen) return null;
+
+  const currentStageIndex = STAGES.findIndex((s) => s.key === status);
 
   return (
     <Dialog
       isOpen={isOpen}
       onClose={() => {
-        if (isAllDone) onFinish();
+        if (isCompleted) onFinish();
+        else if (isFailed && onClose) onClose();
       }}
       maxWidth="xl"
     >
@@ -49,8 +66,12 @@ export const IndexingProgressModal: React.FC<IndexingProgressModalProps> = ({
         {/* Terminal Header */}
         <div className="flex items-center justify-between border-b border-[#48454d]/30 pb-4">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-[#292a2d] border border-[#fbcfe8]/20 flex items-center justify-center text-[#fbcfe8]">
-              <span className="material-symbols-outlined text-[22px] animate-pulse">terminal</span>
+            <div className={`w-10 h-10 rounded-xl bg-[#292a2d] border flex items-center justify-center ${
+              isFailed ? 'border-red-500/40 text-red-400' : 'border-[#fbcfe8]/20 text-[#fbcfe8]'
+            }`}>
+              <span className="material-symbols-outlined text-[22px] animate-pulse">
+                {isFailed ? 'error' : isCompleted ? 'check_circle' : 'terminal'}
+              </span>
             </div>
             <div>
               <h3 className="text-base font-heading font-semibold text-[#e3e2e6] flex items-center gap-2">
@@ -60,28 +81,43 @@ export const IndexingProgressModal: React.FC<IndexingProgressModalProps> = ({
                 </span>
               </h3>
               <p className="text-xs text-[#938f98] font-mono mt-0.5">
-                AST Parser • Vector Embedding Pipeline • Code Graph
+                PostgreSQL + pgvector • AST Parser • RAG Vector Pipeline
               </p>
             </div>
           </div>
           <div className="text-right font-mono">
-            <span className="text-xl font-bold text-[#fbcfe8]">{overallPercentage}%</span>
-            <p className="text-[10px] text-[#938f98] uppercase">Overall Progress</p>
+            <span className={`text-xl font-bold ${isFailed ? 'text-red-400' : 'text-[#fbcfe8]'}`}>
+              {progress}%
+            </span>
+            <p className="text-[10px] text-[#938f98] uppercase">
+              {isFailed ? 'FAILED' : isCompleted ? 'COMPLETE' : 'PROGRESS'}
+            </p>
           </div>
         </div>
 
         {/* Overall Progress Bar */}
-        <Progress value={overallPercentage} />
+        <Progress value={progress} />
 
-        {/* Step-by-Step State Tracker List */}
+        {/* Error Notification if failed */}
+        {isFailed && errorMessage && (
+          <div className="p-3.5 rounded-xl bg-red-950/30 border border-red-500/40 text-red-200 text-xs font-mono">
+            <div className="flex items-center gap-2 font-semibold text-red-400 mb-1">
+              <span className="material-symbols-outlined text-[16px]">warning</span>
+              Indexing Error
+            </div>
+            <p>{errorMessage}</p>
+          </div>
+        )}
+
+        {/* Real Stage Tracker List */}
         <div className="space-y-2 bg-[#121316] rounded-xl p-4 border border-[#48454d]/30 font-mono text-xs max-h-72 overflow-y-auto">
-          {steps.map((step, idx) => {
-            const isDone = step.status === 'completed';
-            const isInProgress = step.status === 'in_progress';
+          {STAGES.map((s, idx) => {
+            const isDone = isCompleted || (currentStageIndex > idx);
+            const isInProgress = !isCompleted && !isFailed && (currentStageIndex === idx || (currentStageIndex === -1 && idx === 0));
 
             return (
               <div
-                key={step.id}
+                key={s.key}
                 className={`flex items-center justify-between p-2.5 rounded-lg border transition-all ${
                   isDone
                     ? 'bg-[#1a1b1e] border-[#48454d]/30 text-[#cac5ce]'
@@ -105,14 +141,14 @@ export const IndexingProgressModal: React.FC<IndexingProgressModalProps> = ({
                     )}
                   </div>
                   <div>
-                    <span className="font-semibold">{step.label}</span>
-                    <p className="text-[11px] opacity-75 font-sans">{step.detail}</p>
+                    <span className="font-semibold">{s.label}</span>
+                    <p className="text-[11px] opacity-75 font-sans">{s.detail}</p>
                   </div>
                 </div>
 
                 <div className="text-right">
                   <span className="text-[11px] font-mono">
-                    {isDone ? 'DONE' : isInProgress ? `${step.progress}%` : 'QUEUED'}
+                    {isDone ? 'DONE' : isInProgress ? 'IN PROGRESS' : 'QUEUED'}
                   </span>
                 </div>
               </div>
@@ -123,20 +159,29 @@ export const IndexingProgressModal: React.FC<IndexingProgressModalProps> = ({
         {/* Footer actions */}
         <div className="flex items-center justify-between pt-2">
           <p className="text-xs text-[#938f98] font-mono">
-            {isAllDone
+            {isCompleted
               ? '✨ Codebase successfully parsed and indexed!'
-              : 'Please keep this window open while we index AST nodes...'}
+              : isFailed
+              ? '❌ Indexing failed. Please check repository or API key configuration.'
+              : stage || 'Analyzing repository files...'}
           </p>
 
-          <Button
-            variant="primary"
-            disabled={!isAllDone}
-            onClick={onFinish}
-            className="w-full sm:w-auto"
-          >
-            Explore Codebase
-            <span className="material-symbols-outlined text-[18px] ml-1.5">arrow_forward</span>
-          </Button>
+          <div className="flex items-center gap-2">
+            {isFailed && onClose && (
+              <Button variant="secondary" onClick={onClose}>
+                Close
+              </Button>
+            )}
+            <Button
+              variant="primary"
+              disabled={!isCompleted}
+              onClick={onFinish}
+              className="w-full sm:w-auto"
+            >
+              Explore Codebase
+              <span className="material-symbols-outlined text-[18px] ml-1.5">arrow_forward</span>
+            </Button>
+          </div>
         </div>
       </div>
     </Dialog>

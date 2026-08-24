@@ -8,14 +8,16 @@ import { GithubUrlTab } from './GithubUrlTab';
 export interface UploadModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onStartProcess: (repoSource: string) => void;
+  onUploadZip: (file: File) => void;
+  onImportGithub: (url: string) => void;
   initialTab?: 'zip' | 'github';
 }
 
 export const UploadModal: React.FC<UploadModalProps> = ({
   isOpen,
   onClose,
-  onStartProcess,
+  onUploadZip,
+  onImportGithub,
   initialTab = 'zip'
 }) => {
   const [activeTab, setActiveTab] = useState<'zip' | 'github'>(initialTab);
@@ -25,7 +27,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
       isOpen={isOpen}
       onClose={onClose}
       title="Upload & Index Repository"
-      description="Scan a GitHub repository or upload a local ZIP file to generate vector embeddings and explore code architecture."
+      description="Scan a public GitHub repository or upload a local ZIP file to analyze code architecture and generate vector embeddings."
       maxWidth="lg"
     >
       {/* Tab Selectors */}
@@ -58,16 +60,16 @@ export const UploadModal: React.FC<UploadModalProps> = ({
       {/* Active Tab Content */}
       {activeTab === 'zip' ? (
         <ZipUploadTab
-          onStartUpload={(filename) => {
+          onStartUpload={(file) => {
             onClose();
-            onStartProcess(filename);
+            onUploadZip(file);
           }}
         />
       ) : (
         <GithubUrlTab
           onStartClone={(url) => {
             onClose();
-            onStartProcess(url);
+            onImportGithub(url);
           }}
         />
       )}
