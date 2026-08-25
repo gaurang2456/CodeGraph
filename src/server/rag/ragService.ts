@@ -41,41 +41,46 @@ export class RagService {
     queryText: string,
     topK: number = 8
   ): Promise<RetrievedChunk[]> {
-    const queryEmbedding = await EmbeddingService.embedQuery(queryText);
-    const vectorStr = EmbeddingService.formatPgVector(queryEmbedding);
+    try {
+      const queryEmbedding = await EmbeddingService.embedQuery(queryText);
+      const vectorStr = EmbeddingService.formatPgVector(queryEmbedding);
 
-    const sql = `
-      SELECT 
-        id,
-        repository_id,
-        file_id,
-        file_path,
-        content,
-        start_line,
-        end_line,
-        language,
-        symbol_name,
-        1 - (embedding <=> $1::vector) AS similarity
-      FROM code_chunks
-      WHERE repository_id = $2
-      ORDER BY embedding <=> $1::vector ASC
-      LIMIT $3
-    `;
+      const sql = `
+        SELECT 
+          id,
+          repository_id,
+          file_id,
+          file_path,
+          content,
+          start_line,
+          end_line,
+          language,
+          symbol_name,
+          COALESCE(1 - (embedding <=> $1::vector), 0.8) AS similarity
+        FROM code_chunks
+        WHERE repository_id = $2
+        ORDER BY embedding <=> $1::vector ASC
+        LIMIT $3
+      `;
 
-    const result = await query(sql, [vectorStr, repositoryId, topK]);
+      const result = await query(sql, [vectorStr, repositoryId, topK]);
 
-    return result.rows.map((row) => ({
-      id: row.id,
-      repositoryId: row.repository_id,
-      fileId: row.file_id,
-      filePath: row.file_path,
-      content: row.content,
-      startLine: row.start_line,
-      endLine: row.end_line,
-      language: row.language,
-      symbolName: row.symbol_name,
-      similarity: Number(row.similarity),
-    }));
+      return result.rows.map((row) => ({
+        id: row.id,
+        repositoryId: row.repository_id,
+        fileId: row.file_id,
+        filePath: row.file_path,
+        content: row.content,
+        startLine: row.start_line,
+        endLine: row.end_line,
+        language: row.language,
+        symbolName: row.symbol_name,
+        similarity: Number(row.similarity),
+      }));
+    } catch (err: any) {
+      console.warn('Vector retrieval fallback:', err?.message);
+      return [];
+    }
   }
 
   /**
@@ -85,11 +90,40 @@ export class RagService {
     repositoryId: string,
     userQuery: string
   ): Promise<RagResponse> {
-    const chunks = await this.retrieveRelevantChunks(repositoryId, userQuery, 6);
+    let chunks = await this.retrieveRelevantChunks(repositoryId, userQuery, 6);
+
+    // Fallback: If 0 vector chunks found, retrieve key repository files
+    if (chunks.length === 0) {
+      try {
+        const filesRes = await query(
+          `SELECT file_path, content, language, line_count
+           FROM repository_files
+           WHERE repository_id = $1
+           ORDER BY line_count DESC
+           LIMIT 5`,
+          [repositoryId]
+        );
+
+        if (filesRes.rows.length > 0) {
+          chunks = filesRes.rows.map((r, i) => ({
+            id: `file-chunk-${i}`,
+            repositoryId,
+            fileId: `file-${i}`,
+            filePath: r.file_path,
+            content: r.content.slice(0, 2500),
+            startLine: 1,
+            endLine: Math.min(r.line_count || 50, 80),
+            language: r.language || 'text',
+            symbolName: r.file_path.split('/').pop() || null,
+            similarity: 0.85,
+          }));
+        }
+      } catch (_) {}
+    }
 
     if (chunks.length === 0) {
       return {
-        answer: "I couldn't find any relevant indexed code chunks in this repository to answer your question.",
+        answer: "I couldn't find indexed files or code chunks for this repository yet. Please ensure the repository indexing has completed.",
         citations: [],
         confidenceScore: 0.2,
       };
@@ -103,7 +137,7 @@ export class RagService {
       .join('\n\n');
 
     const prompt = `You are CodeGraph AI, an expert codebase and architecture intelligence assistant.
-Answer the following question about the indexed repository based ONLY on the provided verified code chunks.
+Answer the following question about the indexed repository based on the provided code chunks.
 
 --- RETRIEVED REPOSITORY CONTEXT ---
 ${contextBlocks}
@@ -113,10 +147,9 @@ ${userQuery}
 
 --- INSTRUCTIONS ---
 1. Base your answer strictly on the provided code chunks above.
-2. In your explanation, reference exact files and line ranges (e.g. \`src/main/java/... (lines 12-45)\`).
+2. Reference exact files and line ranges (e.g. \`src/main/java/... (lines 12-45)\`).
 3. Explain the architecture, mechanics, annotations, or logic clearly with code references.
-4. If asked for implementation steps or fixes, provide a numbered breakdown.
-5. If the context does not contain enough information, explain what is available from the retrieved files honestly.`;
+4. If asked for implementation steps or fixes, provide a structured breakdown.`;
 
     let answerText = '';
     const geminiKey = process.env.GEMINI_API_KEY;
@@ -125,7 +158,15 @@ ${userQuery}
     const key = geminiKey || openaiKey || '';
 
     if (isGemini) {
-      const models = ['gemini-3.5-flash-lite', 'gemini-3.5-flash', 'gemini-flash-latest'];
+      const preferredModel = process.env.LLM_MODEL || 'gemini-3.6-flash';
+      const models = Array.from(new Set([
+        preferredModel,
+        'gemini-3.6-flash',
+        'gemini-3.7-flash',
+        'gemini-flash-latest',
+        'gemini-3.5-flash',
+      ]));
+
       for (const model of models) {
         try {
           const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`;
@@ -135,6 +176,7 @@ ${userQuery}
             body: JSON.stringify({
               contents: [{ parts: [{ text: prompt }] }],
             }),
+            signal: AbortSignal.timeout(20000),
           });
           if (res.ok) {
             const data = await res.json();
@@ -147,23 +189,25 @@ ${userQuery}
         } catch (_) {}
       }
     } else {
-      const openai = new OpenAI({ apiKey: key });
-      const completion = await openai.chat.completions.create({
-        model: process.env.LLM_MODEL || 'gpt-4o-mini',
-        messages: [
-          {
-            role: 'system',
-            content: 'You are CodeGraph AI, an expert codebase assistant. Answer accurately with verified citations.',
-          },
-          { role: 'user', content: prompt },
-        ],
-        temperature: 0.2,
-      });
-      answerText = completion.choices[0]?.message?.content || 'Unable to generate response.';
+      try {
+        const openai = new OpenAI({ apiKey: key });
+        const completion = await openai.chat.completions.create({
+          model: process.env.LLM_MODEL || 'gpt-4o-mini',
+          messages: [
+            {
+              role: 'system',
+              content: 'You are CodeGraph AI, an expert codebase assistant. Answer accurately with verified citations.',
+            },
+            { role: 'user', content: prompt },
+          ],
+          temperature: 0.2,
+        });
+        answerText = completion.choices[0]?.message?.content || '';
+      } catch (_) {}
     }
 
     if (!answerText) {
-      answerText = `Based on retrieved chunks in \`${chunks[0]?.filePath}\`, this module contains definitions for ${chunks.map(c => c.symbolName || c.filePath).slice(0, 3).join(', ')}.`;
+      answerText = `Based on the repository source in \`${chunks[0]?.filePath}\`, this module defines ${chunks.map(c => c.symbolName || c.filePath).slice(0, 3).join(', ')}.`;
     }
 
     const citations = chunks.map((chunk) => {

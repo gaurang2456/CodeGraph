@@ -1,4 +1,6 @@
 import { extractZipArchive, ExtractedFile } from './zipExtractor';
+import { shouldIndexFile, detectLanguage } from './fileFilter';
+import path from 'path';
 
 export interface GitHubRepoInfo {
   owner: string;
@@ -16,11 +18,14 @@ export function parseGitHubUrl(input: string): GitHubRepoInfo {
   cleaned = cleaned.replace(/^git@github\.com:/, 'https://github.com/');
   cleaned = cleaned.replace(/\.git$/, '');
 
-  const match = cleaned.match(/(?:https?:\/\/)?(?:www\.)?github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)/i)
-    || cleaned.match(/^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)$/);
+  const match =
+    cleaned.match(/(?:https?:\/\/)?(?:www\.)?github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)/i) ||
+    cleaned.match(/^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)$/);
 
   if (!match) {
-    throw new Error(`Invalid GitHub repository URL: "${input}". Format should be https://github.com/owner/repository or owner/repository.`);
+    throw new Error(
+      `Invalid GitHub repository URL: "${input}". Format should be https://github.com/owner/repository or owner/repository.`
+    );
   }
 
   const owner = match[1];
@@ -36,52 +41,175 @@ export function parseGitHubUrl(input: string): GitHubRepoInfo {
 
 /**
  * Downloads and extracts a public GitHub repository.
+ * Pre-filters out node_modules and binary files via Git Tree, then fetches clean source files.
  */
 export async function downloadGitHubRepository(
   urlOrRepo: string
 ): Promise<{ info: GitHubRepoInfo; files: ExtractedFile[] }> {
   const info = parseGitHubUrl(urlOrRepo);
+  const branchesToTry = ['main', 'master'];
 
-  // Try fetching repository metadata from GitHub API to determine default branch
-  let branch = 'main';
+  // 1. Try resolving the default branch via GitHub API metadata
   try {
     const metaRes = await fetch(`https://api.github.com/repos/${info.owner}/${info.repo}`, {
       headers: {
         'User-Agent': 'CodeGraph-Ingestion-Engine/1.0',
-        'Accept': 'application/vnd.github.v3+json',
+        Accept: 'application/vnd.github.v3+json',
       },
+      signal: AbortSignal.timeout(6000),
     });
 
     if (metaRes.ok) {
       const meta = await metaRes.json();
-      if (meta.default_branch) {
-        branch = meta.default_branch;
-        info.defaultBranch = branch;
+      if (meta.default_branch && !branchesToTry.includes(meta.default_branch)) {
+        branchesToTry.unshift(meta.default_branch);
       }
     }
-  } catch (e) {
-    console.warn(`[GitHub API] Could not fetch repo metadata, defaulting to branch '${branch}'`);
+  } catch (_) {}
+
+  // 2. Fast Tree Ingestion: Query Git Tree, filter out node_modules, and fetch only clean source files
+  for (const branch of branchesToTry) {
+    try {
+      const treeRes = await fetch(
+        `https://api.github.com/repos/${info.owner}/${info.repo}/git/trees/${branch}?recursive=1`,
+        {
+          headers: {
+            'User-Agent': 'CodeGraph-Ingestion-Engine/1.0',
+            Accept: 'application/vnd.github.v3+json',
+          },
+          signal: AbortSignal.timeout(12000),
+        }
+      );
+
+      if (treeRes.ok) {
+        const treeData = await treeRes.json();
+        const rawTree: Array<{ path: string; type: string; url?: string; sha?: string }> = treeData.tree || [];
+
+        // Filter out all node_modules, target, dist, build, and binary files
+        const sourceBlobs = rawTree.filter(
+          (item) => item.type === 'blob' && shouldIndexFile(item.path)
+        );
+
+        if (sourceBlobs.length > 0) {
+          info.defaultBranch = branch;
+          const extractedFiles: ExtractedFile[] = [];
+          const BATCH_SIZE = 20;
+
+          for (let i = 0; i < sourceBlobs.length; i += BATCH_SIZE) {
+            const batch = sourceBlobs.slice(i, i + BATCH_SIZE);
+            const batchPromises = batch.map(async (blob) => {
+              // Try CDN and API endpoints with automatic fallback
+              const urls = [
+                `https://cdn.jsdelivr.net/gh/${info.owner}/${info.repo}@${branch}/${blob.path}`,
+                blob.sha ? `https://api.github.com/repos/${info.owner}/${info.repo}/git/blobs/${blob.sha}` : '',
+                `https://raw.githubusercontent.com/${info.owner}/${info.repo}/${branch}/${blob.path}`,
+              ].filter(Boolean);
+
+              for (const u of urls) {
+                try {
+                  const res = await fetch(u, {
+                    headers: { 'User-Agent': 'CodeGraph-Ingestion-Engine/1.0' },
+                    signal: AbortSignal.timeout(10000),
+                  });
+
+                  if (res.ok) {
+                    let content = '';
+                    if (u.includes('/git/blobs/')) {
+                      const json = await res.json();
+                      if (json.content) {
+                        content = Buffer.from(json.content, 'base64').toString('utf8');
+                      }
+                    } else {
+                      content = await res.text();
+                    }
+
+                    if (content) {
+                      const fileName = path.basename(blob.path);
+                      const extension = path.extname(fileName).toLowerCase();
+                      const language = detectLanguage(blob.path);
+                      const lineCount = content.split(/\r\n|\r|\n/).length;
+
+                      return {
+                        filePath: blob.path,
+                        fileName,
+                        extension,
+                        language,
+                        content,
+                        lineCount,
+                      };
+                    }
+                  }
+                } catch (_) {}
+              }
+              return null;
+            });
+
+            const batchResults = await Promise.all(batchPromises);
+            for (const f of batchResults) {
+              if (f) extractedFiles.push(f);
+            }
+          }
+
+          if (extractedFiles.length > 0) {
+            console.log(`⚡ Fast Ingestion: Retrieved ${extractedFiles.length} clean source files for ${info.fullName} (skipped node_modules/binaries).`);
+            return {
+              info,
+              files: extractedFiles,
+            };
+          }
+        }
+      }
+    } catch (_) {}
   }
 
-  // Download zipball from GitHub
-  const zipUrl = `https://api.github.com/repos/${info.owner}/${info.repo}/zipball/${branch}`;
-  const zipRes = await fetch(zipUrl, {
-    headers: {
-      'User-Agent': 'CodeGraph-Ingestion-Engine/1.0',
-      'Accept': 'application/vnd.github.v3+json',
-    },
-    redirect: 'follow',
-  });
+  // 3. Fallback to direct archive extraction
+  let downloadedBuffer: ArrayBuffer | null = null;
+  let lastError: string = '';
 
-  if (!zipRes.ok) {
-    if (zipRes.status === 404) {
-      throw new Error(`Repository '${info.fullName}' was not found. Please ensure it is a public repository.`);
+  for (const branch of branchesToTry) {
+    const downloadUrls = [
+      `https://codeload.github.com/${info.owner}/${info.repo}/zip/refs/heads/${branch}`,
+      `https://github.com/${info.owner}/${info.repo}/archive/refs/heads/${branch}.zip`,
+    ];
+
+    for (const url of downloadUrls) {
+      try {
+        const res = await fetch(url, {
+          headers: {
+            'User-Agent': 'CodeGraph-Ingestion-Engine/1.0',
+          },
+          redirect: 'follow',
+          signal: AbortSignal.timeout(180000),
+        });
+
+        if (res.ok) {
+          downloadedBuffer = await res.arrayBuffer();
+          info.defaultBranch = branch;
+          break;
+        } else if (res.status === 404) {
+          lastError = `Branch '${branch}' not found on ${info.fullName}.`;
+        }
+      } catch (err: any) {
+        lastError = err?.message || 'Download request timed out.';
+      }
     }
-    throw new Error(`Failed to download repository archive from GitHub (Status: ${zipRes.status} ${zipRes.statusText})`);
+
+    if (downloadedBuffer) break;
   }
 
-  const arrayBuffer = await zipRes.arrayBuffer();
-  const files = await extractZipArchive(arrayBuffer);
+  if (!downloadedBuffer) {
+    throw new Error(
+      `Could not download repository '${info.fullName}'. ${lastError || 'Please ensure the repository is public and contains a main or master branch.'}`
+    );
+  }
+
+  const files = await extractZipArchive(downloadedBuffer);
+
+  if (files.length === 0) {
+    throw new Error(
+      `Repository '${info.fullName}' was downloaded successfully but contained 0 indexable source files.`
+    );
+  }
 
   return {
     info,

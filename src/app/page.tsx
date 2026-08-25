@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Repository, TabType } from '@/types';
+import { Repository, TabType, ArchitectureFlowNode } from '@/types';
 
 import { Navbar } from '@/components/layout/Navbar';
 import { Sidebar } from '@/components/layout/Sidebar';
@@ -28,6 +28,7 @@ export default function Home() {
   const [isRightPanelOpen, setIsRightPanelOpen] = useState(true);
   const [selectedFile, setSelectedFile] = useState<string>('');
   const [targetLineRange, setTargetLineRange] = useState<{ startLine?: number; endLine?: number }>({});
+  const [activeLayerFilter, setActiveLayerFilter] = useState<{ label: string; count: number; files: string[] } | null>(null);
   const [loadingRepos, setLoadingRepos] = useState(true);
 
   // Modals state
@@ -215,6 +216,29 @@ export default function Home() {
     setShowLanding(false);
   };
 
+  const handleNavigateToArchitectureLayer = (node: ArchitectureFlowNode) => {
+    setActiveLayerFilter({
+      label: node.label,
+      count: node.files.length,
+      files: node.files,
+    });
+
+    const primaryRef = node.references?.[0];
+    const primaryFile = primaryRef?.filePath || node.files[0] || '';
+
+    if (primaryFile) {
+      setSelectedFile(primaryFile);
+      if (primaryRef?.startLine && primaryRef?.endLine) {
+        setTargetLineRange({ startLine: primaryRef.startLine, endLine: primaryRef.endLine });
+      } else {
+        setTargetLineRange({});
+      }
+    }
+
+    setActiveTab('files');
+    setShowLanding(false);
+  };
+
   const handleAskAiFromAnywhere = (prompt: string) => {
     setIsRightPanelOpen(true);
   };
@@ -262,7 +286,12 @@ export default function Home() {
           {/* Left Sidebar Fixed 260px */}
           <Sidebar
             activeTab={activeTab}
-            onTabChange={setActiveTab}
+            onTabChange={(tab) => {
+              if (tab !== 'files') {
+                setActiveLayerFilter(null);
+              }
+              setActiveTab(tab);
+            }}
             onOpenUploadModal={() => {
               setUploadInitialTab('zip');
               setIsUploadModalOpen(true);
@@ -279,7 +308,11 @@ export default function Home() {
                 <RepositorySummaryView
                   repo={activeRepo}
                   onNavigateToGraph={() => setActiveTab('graph')}
-                  onNavigateToFiles={() => setActiveTab('files')}
+                  onNavigateToFiles={() => {
+                    setActiveLayerFilter(null);
+                    setActiveTab('files');
+                  }}
+                  onNavigateToArchitectureNode={handleNavigateToArchitectureLayer}
                   onAskQuestion={handleAskAiFromAnywhere}
                 />
               )}
@@ -297,6 +330,8 @@ export default function Home() {
                   repo={activeRepo}
                   selectedFile={selectedFile}
                   targetLineRange={targetLineRange}
+                  activeLayerFilter={activeLayerFilter}
+                  onClearFilter={() => setActiveLayerFilter(null)}
                   onFileSelect={handleSelectFileFromAnywhere}
                   onAskAi={handleAskAiFromAnywhere}
                 />

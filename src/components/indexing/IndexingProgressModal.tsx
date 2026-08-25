@@ -58,7 +58,7 @@ export const IndexingProgressModal: React.FC<IndexingProgressModalProps> = ({
       isOpen={isOpen}
       onClose={() => {
         if (isCompleted) onFinish();
-        else if (isFailed && onClose) onClose();
+        else if (onClose) onClose();
       }}
       maxWidth="xl"
     >
@@ -167,9 +167,9 @@ export const IndexingProgressModal: React.FC<IndexingProgressModalProps> = ({
           </p>
 
           <div className="flex items-center gap-2">
-            {isFailed && onClose && (
+            {!isCompleted && onClose && (
               <Button variant="secondary" onClick={onClose}>
-                Close
+                {isFailed ? 'Close' : 'Cancel'}
               </Button>
             )}
             <Button

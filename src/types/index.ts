@@ -27,7 +27,7 @@ export interface ChatMessage {
 
 export interface Technology {
   name: string;
-  category: 'language' | 'framework' | 'database' | 'caching' | 'auth' | 'build' | 'container' | 'tools';
+  category: 'language' | 'framework' | 'adapter' | 'database' | 'caching' | 'auth' | 'build' | 'container' | 'tools';
   icon?: string;
   color?: string;
 }
@@ -41,10 +41,35 @@ export interface RepositoryStats {
   functions: number;
 }
 
+export interface ArchitectureFlowReference {
+  filePath: string;
+  symbolName?: string;
+  symbolType?: string;
+  startLine?: number;
+  endLine?: number;
+}
+
+export interface ArchitectureFlowNode {
+  id: string;
+  label: string;
+  type: 'entry' | 'controller' | 'route' | 'service' | 'module' | 'repository' | 'entity' | 'database' | 'cache' | 'config' | string;
+  description?: string;
+  icon?: string;
+  color?: string;
+  files: string[];
+  symbols: string[];
+  references: ArchitectureFlowReference[];
+}
+
+export interface ArchitectureFlow {
+  nodes: ArchitectureFlowNode[];
+}
+
 export interface RepositorySummary {
   projectType: string;
   architecture: string;
   backend: string;
+  httpAdapter?: string;
   frontend: string;
   authentication: string;
   database: string;
@@ -52,6 +77,7 @@ export interface RepositorySummary {
   buildTool?: string;
   description: string;
   keyPackages: string[];
+  architectureFlow?: ArchitectureFlow;
 }
 
 export interface GraphNode {

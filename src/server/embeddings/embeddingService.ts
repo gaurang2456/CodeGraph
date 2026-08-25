@@ -91,7 +91,7 @@ export class EmbeddingService {
  * Calls Gemini REST embedding API with 1536-dimensional output.
  */
 async function generateGeminiEmbedding(text: string, apiKey: string): Promise<number[]> {
-  const modelsToTry = ['gemini-embedding-001', 'gemini-embedding-2'];
+  const modelsToTry = ['text-embedding-004', 'embedding-001', 'gemini-embedding-001', 'gemini-embedding-2'];
 
   for (const model of modelsToTry) {
     try {

@@ -56,6 +56,23 @@ export async function POST(
     // Run RAG pipeline
     const ragResult = await RagService.answerQuestion(id, prompt.trim());
 
+    // Save assistant reply to database
+    try {
+      await query(
+        `INSERT INTO chat_messages (id, repository_id, sender, content, citations, confidence_score)
+         VALUES ($1, $2, 'assistant', $3, $4::jsonb, $5)`,
+        [
+          `msg-${Date.now()}-${Math.random().toString(36).substring(7)}`,
+          id,
+          ragResult.answer,
+          JSON.stringify(ragResult.citations || []),
+          ragResult.confidenceScore || 0.9,
+        ]
+      );
+    } catch (e) {
+      console.warn('Could not save assistant message:', e);
+    }
+
     return NextResponse.json(ragResult);
   } catch (error: any) {
     console.error('Error in chat RAG endpoint:', error);

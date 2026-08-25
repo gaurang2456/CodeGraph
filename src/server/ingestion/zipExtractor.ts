@@ -11,7 +11,7 @@ export interface ExtractedFile {
   lineCount: number;
 }
 
-const MAX_UNCOMPRESSED_BYTES = 100 * 1024 * 1024; // 100 MB max
+const MAX_UNCOMPRESSED_BYTES = 500 * 1024 * 1024; // 500 MB max
 const MAX_TOTAL_FILES = 5000;
 
 /**
