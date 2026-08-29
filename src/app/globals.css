@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "@xyflow/react/dist/style.css";
 
 @layer base {
   :root {
@@ -110,3 +111,54 @@ code, pre, .font-mono, .code-font {
   -webkit-backdrop-filter: blur(12px);
   border: 1px solid rgba(72, 69, 77, 0.35);
 }
+
+/* React Flow Dark Customizations */
+.react-flow__pane {
+  cursor: grab;
+}
+.react-flow__pane:active {
+  cursor: grabbing;
+}
+.react-flow__controls {
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid rgba(72, 69, 77, 0.3);
+  background: #1a1b1e !important;
+}
+.react-flow__controls-button {
+  background: #1a1b1e !important;
+  border-bottom: 1px solid rgba(72, 69, 77, 0.2) !important;
+  color: #cac5ce !important;
+  fill: #cac5ce !important;
+}
+.react-flow__controls-button:hover {
+  background: #292a2d !important;
+  color: #fbcfe8 !important;
+  fill: #fbcfe8 !important;
+}
+.react-flow__minimap {
+  background: #111316 !important;
+  border: 1px solid rgba(72, 69, 77, 0.3) !important;
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+}
+.react-flow__edge-path {
+  stroke-width: 1.75;
+  transition: stroke-width 0.2s ease, stroke 0.2s ease;
+}
+.react-flow__edge.selected .react-flow__edge-path {
+  stroke-width: 2.5;
+  stroke: #fbcfe8 !important;
+}
+.react-flow__edge:hover .react-flow__edge-path {
+  stroke-width: 2.5;
+}
+.react-flow__handle {
+  width: 7px;
+  height: 7px;
+  background: #70485c;
+  border: 1.5px solid #fbcfe8;
+  border-radius: 50%;
+}
+

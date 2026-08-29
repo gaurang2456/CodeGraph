@@ -1,9 +1,10 @@
 import { ExtractedFile } from './zipExtractor';
-import { shouldIndexFile, detectLanguage } from './fileFilter';
+import { shouldIndexFile, detectLanguage, sanitizePostgresText } from './fileFilter';
 import { CodeParser } from '../parsing/codeParser';
 import { ParsedChunk } from '../parsing/types';
 import { EmbeddingService } from '../embeddings/embeddingService';
 import { SummaryService } from '../summary/summaryService';
+import { CodeGraphEngine } from '../analyzer/codeGraphEngine';
 import { query } from '../db/client';
 
 export class IndexingPipeline {
@@ -60,7 +61,7 @@ export class IndexingPipeline {
             file.extension,
             file.language,
             file.lineCount,
-            file.content
+            sanitizePostgresText(file.content)
           );
         });
 
@@ -100,6 +101,18 @@ export class IndexingPipeline {
       const chunksToIndex = prioritizedChunks.slice(0, MAX_CHUNKS);
 
       await this.updateProgress(repositoryId, 'CHUNKING', `Created ${chunksToIndex.length} semantic code units...`, 60);
+
+      // Stage: AST Symbol & Code Relationship Graph Analysis (Phase 2 Engine)
+      try {
+        await this.updateProgress(repositoryId, 'PARSING', 'Extracting AST symbols and mapping relationships...', 68);
+        const graphResult = await CodeGraphEngine.analyzeAndStore(repositoryId, files);
+        console.log(
+          `📊 AST Graph analysis complete for ${repositoryId}: ${graphResult.symbols.length} symbols, ${graphResult.relationships.length} relationships, ${graphResult.errors.length} file notices.`
+        );
+      } catch (graphErr) {
+        // Graceful non-blocking error handling to ensure Phase 1 indexing is never interrupted
+        console.error(`⚠️ AST Graph analysis encountered a non-fatal error for repository ${repositoryId}:`, graphErr);
+      }
 
       // Detect Technologies and Calculate Stats
       const technologies = SummaryService.detectTechnologies(files);
@@ -154,7 +167,7 @@ export class IndexingPipeline {
             repositoryId,
             fileId,
             chunk.filePath,
-            chunk.content,
+            sanitizePostgresText(chunk.content),
             vectorStr,
             chunk.startLine,
             chunk.endLine,

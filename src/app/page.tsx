@@ -301,9 +301,23 @@ export default function Home() {
             }}
           />
 
-          {/* Center Scrollable Content with fixed left and right padding */}
-          <main className="flex-1 min-w-0 pl-[260px] pr-[320px] pt-14 flex flex-col items-center">
-            <div className="w-full max-w-5xl px-6 py-7">
+          {/* Center Scrollable Content with fixed left and dynamic right padding */}
+          <main
+            className={`flex-1 min-w-0 pl-[260px] ${
+              isRightPanelOpen ? 'pr-[320px]' : 'pr-0'
+            } pt-14 flex flex-col transition-all duration-200 ${
+              activeTab === 'graph'
+                ? 'h-[calc(100vh-3.5rem)] p-2 items-stretch overflow-hidden'
+                : 'items-center overflow-y-auto'
+            }`}
+          >
+            <div
+              className={`w-full ${
+                activeTab === 'graph'
+                  ? 'h-full flex-1 flex flex-col'
+                  : 'max-w-5xl px-6 py-7'
+              }`}
+            >
               {activeTab === 'summary' && (
                 <RepositorySummaryView
                   repo={activeRepo}

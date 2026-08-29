@@ -1,5 +1,5 @@
 import { extractZipArchive, ExtractedFile } from './zipExtractor';
-import { shouldIndexFile, detectLanguage } from './fileFilter';
+import { shouldIndexFile, detectLanguage, sanitizePostgresText } from './fileFilter';
 import path from 'path';
 
 export interface GitHubRepoInfo {
@@ -124,17 +124,18 @@ export async function downloadGitHubRepository(
                     }
 
                     if (content) {
+                      const cleanContent = sanitizePostgresText(content);
                       const fileName = path.basename(blob.path);
                       const extension = path.extname(fileName).toLowerCase();
                       const language = detectLanguage(blob.path);
-                      const lineCount = content.split(/\r\n|\r|\n/).length;
+                      const lineCount = cleanContent.split(/\r\n|\r|\n/).length;
 
                       return {
                         filePath: blob.path,
                         fileName,
                         extension,
                         language,
-                        content,
+                        content: cleanContent,
                         lineCount,
                       };
                     }

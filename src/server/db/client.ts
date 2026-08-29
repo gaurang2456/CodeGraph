@@ -149,6 +149,38 @@ export async function ensureDatabaseSchema(): Promise<void> {
       );
 
       CREATE INDEX IF NOT EXISTS idx_chat_messages_repo_id ON chat_messages(repository_id, created_at ASC);
+
+      -- Code Symbols table (Phase 2 AST Engine)
+      CREATE TABLE IF NOT EXISTS code_symbols (
+        id TEXT PRIMARY KEY,
+        repository_id TEXT NOT NULL REFERENCES repositories(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        type TEXT NOT NULL,
+        file_path TEXT NOT NULL,
+        start_line INTEGER NOT NULL,
+        end_line INTEGER NOT NULL,
+        exported BOOLEAN NOT NULL DEFAULT false,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_code_symbols_repo_id ON code_symbols(repository_id);
+      CREATE INDEX IF NOT EXISTS idx_code_symbols_file ON code_symbols(repository_id, file_path);
+      CREATE INDEX IF NOT EXISTS idx_code_symbols_name ON code_symbols(repository_id, name);
+
+      -- Code Relationships table (Phase 2 AST Engine)
+      CREATE TABLE IF NOT EXISTS code_relationships (
+        id TEXT PRIMARY KEY,
+        repository_id TEXT NOT NULL REFERENCES repositories(id) ON DELETE CASCADE,
+        source_symbol_id TEXT NOT NULL,
+        target_symbol_id TEXT NOT NULL,
+        relationship_type TEXT NOT NULL,
+        confidence TEXT NOT NULL DEFAULT 'high',
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_code_relationships_repo ON code_relationships(repository_id);
+      CREATE INDEX IF NOT EXISTS idx_code_relationships_source ON code_relationships(repository_id, source_symbol_id);
+      CREATE INDEX IF NOT EXISTS idx_code_relationships_target ON code_relationships(repository_id, target_symbol_id);
     `;
 
     await query(schemaSql);

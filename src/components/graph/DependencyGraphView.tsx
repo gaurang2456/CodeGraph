@@ -1,48 +1,489 @@
 'use client';
 
-import React from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import {
+  ReactFlow,
+  Controls,
+  Background,
+  MiniMap,
+  useReactFlow,
+  ReactFlowProvider,
+  BackgroundVariant,
+  Node,
+} from '@xyflow/react';
 import { Repository } from '@/types';
+import { SymbolNode } from './SymbolNode';
+import { PurposeNode } from './PurposeNode';
+import { SymbolDetailsPanel } from './SymbolDetailsPanel';
+import { GraphSearch } from './GraphSearch';
+import { GraphFilters } from './GraphFilters';
+import { GraphLegend } from './GraphLegend';
+import {
+  GraphApiResponse,
+  GraphFilterState,
+  GraphFocusState,
+  GraphHierarchyState,
+  DEFAULT_NODE_TYPES,
+  ALL_RELATIONSHIP_TYPES,
+  buildGraphViewModel,
+  GraphApiNode,
+} from './graphUtils';
 
 export interface DependencyGraphViewProps {
   repo: Repository;
-  onSelectFile?: (filename: string) => void;
+  onSelectFile?: (filename: string, startLine?: number, endLine?: number) => void;
   onAskAi?: (prompt: string) => void;
 }
 
-export const DependencyGraphView: React.FC<DependencyGraphViewProps> = ({ repo, onAskAi }) => {
-  return (
-    <div className="w-full h-[calc(100vh-8.5rem)] min-h-[540px] rounded-xl border border-[#48454d]/25 bg-[#111316] p-8 flex flex-col items-center justify-center text-center relative overflow-hidden">
-      <div className="absolute inset-0 bg-dot-pattern opacity-40 pointer-events-none"></div>
+const nodeTypes: any = {
+  purposeNode: PurposeNode,
+  symbolNode: SymbolNode,
+};
 
-      <div className="relative z-10 max-w-md space-y-4">
-        <div className="w-16 h-16 rounded-2xl bg-[#292a2d] border border-[#fbcfe8]/20 flex items-center justify-center text-[#fbcfe8] mx-auto shadow-xl">
-          <span className="material-symbols-outlined text-[32px]">hub</span>
-        </div>
+const DEFAULT_FILTERS: GraphFilterState = {
+  nodeTypes: new Set(DEFAULT_NODE_TYPES),
+  relationshipTypes: new Set(ALL_RELATIONSHIP_TYPES),
+  includeMediumConfidence: false,
+  includeMethods: false,
+  maxInitialNodes: 50,
+};
 
-        <div className="space-y-1.5">
-          <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-[#fbcfe8]/10 text-[#fbcfe8] text-[10px] font-mono uppercase tracking-widest border border-[#fbcfe8]/20">
-            Coming in Phase 2
+const DEFAULT_FOCUS: GraphFocusState = {
+  focusedNodeId: null,
+  expandedNodeIds: new Set<string>(),
+};
+
+const DEFAULT_HIERARCHY: GraphHierarchyState = {
+  expandedPurposeIds: new Set<string>(),
+  unfoldedNodeIds: new Set<string>(),
+  viewLevel: 'purpose',
+};
+
+function InnerCodeGraphView({ repo, onSelectFile, onAskAi }: DependencyGraphViewProps) {
+  const reactFlowInstance = useReactFlow();
+
+  const [apiData, setApiData] = useState<GraphApiResponse | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const [filterState, setFilterState] = useState<GraphFilterState>(DEFAULT_FILTERS);
+  const [focusState, setFocusState] = useState<GraphFocusState>(DEFAULT_FOCUS);
+  const [hierarchyState, setHierarchyState] = useState<GraphHierarchyState>(DEFAULT_HIERARCHY);
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [layoutDirection, setLayoutDirection] = useState<'TB' | 'LR'>('TB');
+
+  // 1. Fetch real graph data from GET /api/repositories/[id]/graph
+  const fetchGraphData = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/repositories/${repo.id}/graph`);
+      if (!res.ok) {
+        if (res.status === 404) {
+          throw new Error('Repository not found.');
+        }
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error || 'Failed to fetch repository graph.');
+      }
+      const data: GraphApiResponse = await res.json();
+      setApiData(data);
+    } catch (err: any) {
+      console.error('Error fetching graph data:', err);
+      setError(err?.message || 'Failed to load graph data.');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [repo.id]);
+
+  useEffect(() => {
+    fetchGraphData();
+  }, [fetchGraphData]);
+
+  // Toggle expanding a Purpose Node (Tier 1 -> Tier 2)
+  const handleTogglePurposeExpand = useCallback((purposeId: string) => {
+    setHierarchyState((prev) => {
+      const next = new Set(prev.expandedPurposeIds);
+      if (next.has(purposeId)) {
+        next.delete(purposeId);
+      } else {
+        next.add(purposeId);
+      }
+      return {
+        ...prev,
+        expandedPurposeIds: next,
+      };
+    });
+  }, []);
+
+  // Toggle unfolding methods of a class (Tier 2 -> Tier 3)
+  const handleToggleUnfold = useCallback((nodeId: string) => {
+    setHierarchyState((prev) => {
+      const next = new Set(prev.unfoldedNodeIds);
+      if (next.has(nodeId)) {
+        next.delete(nodeId);
+      } else {
+        next.add(nodeId);
+      }
+      return {
+        ...prev,
+        unfoldedNodeIds: next,
+      };
+    });
+  }, []);
+
+  // Set hierarchy view level preset
+  const handleSetViewLevel = useCallback((level: 'purpose' | 'classes' | 'full') => {
+    setHierarchyState((prev) => ({
+      ...prev,
+      viewLevel: level,
+      expandedPurposeIds: level === 'purpose' ? new Set() : prev.expandedPurposeIds,
+      unfoldedNodeIds: level === 'full' ? prev.unfoldedNodeIds : new Set(),
+    }));
+  }, []);
+
+  // 2. Transform API Data -> React Flow Nodes & Edges on filter, focus, or drilldown change
+  const viewModel = useMemo(() => {
+    if (!apiData) {
+      return {
+        nodes: [],
+        edges: [],
+        totalAvailableNodes: 0,
+        displayedNodeCount: 0,
+        isLimited: false,
+        purposeClusters: [],
+      };
+    }
+    return buildGraphViewModel(
+      apiData,
+      filterState,
+      focusState,
+      selectedNodeId,
+      layoutDirection,
+      hierarchyState,
+      handleToggleUnfold,
+      handleTogglePurposeExpand
+    );
+  }, [
+    apiData,
+    filterState,
+    focusState,
+    selectedNodeId,
+    layoutDirection,
+    hierarchyState,
+    handleToggleUnfold,
+    handleTogglePurposeExpand,
+  ]);
+
+  // Fit View debounce on structural change (NOT on every selection)
+  const prevStructureCountRef = useRef<number>(0);
+  useEffect(() => {
+    const currentCount = viewModel.nodes.length;
+    if (currentCount > 0 && currentCount !== prevStructureCountRef.current) {
+      prevStructureCountRef.current = currentCount;
+      const timer = setTimeout(() => {
+        reactFlowInstance.fitView({ padding: 0.18, duration: 400, maxZoom: 1.05 });
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+  }, [viewModel.nodes.length, reactFlowInstance]);
+
+  // Node selection handler
+  const handleNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
+    if (node.type === 'purposeNode') {
+      const purposeId = (node.data as any).purposeId;
+      handleTogglePurposeExpand(purposeId);
+      return;
+    }
+    setSelectedNodeId(node.id);
+  }, [handleTogglePurposeExpand]);
+
+  const handleSelectNodeById = useCallback(
+    (nodeId: string) => {
+      setSelectedNodeId(nodeId);
+      // Activate Focus Mode directly to isolate the searched symbol + direct incoming & outgoing neighbors
+      setFocusState({
+        focusedNodeId: nodeId,
+        expandedNodeIds: new Set<string>(),
+      });
+    },
+    []
+  );
+
+  // Focus Mode toggling
+  const handleToggleFocus = useCallback((nodeId: string) => {
+    setFocusState((prev) => {
+      if (prev.focusedNodeId === nodeId) {
+        return DEFAULT_FOCUS;
+      }
+      return {
+        focusedNodeId: nodeId,
+        expandedNodeIds: new Set<string>(),
+      };
+    });
+  }, []);
+
+  // Expand Node in Focus Mode
+  const handleExpandNode = useCallback((nodeId: string) => {
+    setFocusState((prev) => {
+      const nextExpanded = new Set(prev.expandedNodeIds);
+      nextExpanded.add(nodeId);
+      return {
+        ...prev,
+        expandedNodeIds: nextExpanded,
+      };
+    });
+  }, []);
+
+  const handleResetFilters = useCallback(() => {
+    setFilterState(DEFAULT_FILTERS);
+    setFocusState(DEFAULT_FOCUS);
+    setHierarchyState(DEFAULT_HIERARCHY);
+  }, []);
+
+  const selectedNodeData: GraphApiNode | null = useMemo(() => {
+    if (!selectedNodeId || !apiData) return null;
+    return apiData.nodes.find((n) => n.id === selectedNodeId) || null;
+  }, [selectedNodeId, apiData]);
+
+  // Empty state: No symbols detected
+  if (!isLoading && apiData && apiData.nodes.length === 0) {
+    return (
+      <div className="w-full h-full min-h-[600px] rounded-3xl border border-[#48454d]/25 bg-gradient-to-b from-[#14161b] to-[#0d0e11] p-12 flex flex-col items-center justify-center text-center relative overflow-hidden select-none shadow-2xl">
+        <div className="absolute inset-0 bg-dot-pattern opacity-30 pointer-events-none"></div>
+        <div className="relative z-10 max-w-md space-y-4">
+          <div className="w-16 h-16 rounded-2xl bg-[#1e2026] border border-[#48454d]/40 flex items-center justify-center text-[#938f98] mx-auto shadow-2xl">
+            <span className="material-symbols-outlined text-[32px]">account_tree</span>
           </div>
-          <h2 className="text-lg font-heading font-semibold text-[#e3e2e6]">
-            Interactive Dependency Graph
-          </h2>
-          <p className="text-xs text-[#938f98] leading-relaxed">
-            Full-codebase call hierarchies, import graphs, and multi-package relation visualizations for <span className="text-[#e3e2e6] font-mono">{repo.name}</span> will be generated automatically in Phase 2.
-          </p>
-        </div>
-
-        <div className="pt-2">
-          {onAskAi && (
-            <button
-              onClick={() => onAskAi(`Explain the high-level module architecture of ${repo.name}`)}
-              className="px-4 py-2 bg-[#1f1f23] hover:bg-[#292a2d] border border-[#48454d]/30 rounded-xl text-xs font-mono text-[#fbcfe8] inline-flex items-center gap-2 transition-colors cursor-pointer"
-            >
-              <span className="material-symbols-outlined text-[16px]">smart_toy</span>
-              Ask AI about Architecture
-            </button>
-          )}
+          <div className="space-y-1.5">
+            <h2 className="text-lg font-heading font-semibold text-[#e3e2e6]">
+              No Supported Symbols Found
+            </h2>
+            <p className="text-xs text-[#938f98] leading-relaxed">
+              This repository does not contain supported TypeScript/JavaScript symbols yet.
+            </p>
+          </div>
         </div>
       </div>
+    );
+  }
+
+  // Error state
+  if (!isLoading && error) {
+    return (
+      <div className="w-full h-full min-h-[600px] rounded-3xl border border-red-500/20 bg-[#121316] p-12 flex flex-col items-center justify-center text-center relative overflow-hidden select-none shadow-2xl">
+        <div className="relative z-10 max-w-md space-y-4">
+          <div className="w-16 h-16 rounded-2xl bg-red-500/10 border border-red-500/30 flex items-center justify-center text-red-400 mx-auto shadow-2xl">
+            <span className="material-symbols-outlined text-[32px]">error</span>
+          </div>
+          <div className="space-y-1">
+            <h2 className="text-base font-heading font-semibold text-[#e3e2e6]">
+              Graph Analysis Unavailable
+            </h2>
+            <p className="text-xs text-red-300/80 leading-relaxed font-mono">{error}</p>
+          </div>
+          <button
+            onClick={fetchGraphData}
+            className="px-5 py-2.5 bg-[#292a2d] hover:bg-[#343538] border border-[#48454d]/30 text-xs font-mono text-[#e3e2e6] rounded-xl transition-colors cursor-pointer shadow-lg"
+          >
+            Retry Analysis
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="w-full h-full min-h-[600px] rounded-3xl border border-[#48454d]/35 bg-[#0b0c10] relative overflow-hidden shadow-2xl flex flex-col">
+      {/* Top Floating Glass Command Bar */}
+      <div className="absolute left-6 top-6 z-20 flex flex-wrap items-center gap-2.5">
+        <GraphSearch
+          nodes={apiData?.nodes || []}
+          onSelectNode={handleSelectNodeById}
+        />
+
+        {/* 3-Tier Hierarchy Drilldown Level Selector */}
+        <div className="flex items-center p-1 bg-[#161820]/95 backdrop-blur-xl border border-[#48454d]/40 rounded-xl shadow-md text-xs font-mono">
+          <button
+            onClick={() => handleSetViewLevel('purpose')}
+            className={`px-3 py-1 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 ${
+              hierarchyState.viewLevel === 'purpose'
+                ? 'bg-[#fbcfe8]/20 text-[#fbcfe8] font-bold border border-[#fbcfe8]/40'
+                : 'text-[#cac5ce] hover:text-white'
+            }`}
+            title="Overview of Purpose and Architecture Modules"
+          >
+            <span className="material-symbols-outlined text-[14px]">category</span>
+            <span>1. Purpose</span>
+          </button>
+
+          <button
+            onClick={() => handleSetViewLevel('classes')}
+            className={`px-3 py-1 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 ${
+              hierarchyState.viewLevel === 'classes'
+                ? 'bg-[#fbcfe8]/20 text-[#fbcfe8] font-bold border border-[#fbcfe8]/40'
+                : 'text-[#cac5ce] hover:text-white'
+            }`}
+            title="Expand into Classes, Interfaces & Enums"
+          >
+            <span className="material-symbols-outlined text-[14px]">view_in_ar</span>
+            <span>2. Classes</span>
+          </button>
+
+          <button
+            onClick={() => handleSetViewLevel('full')}
+            className={`px-3 py-1 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 ${
+              hierarchyState.viewLevel === 'full'
+                ? 'bg-[#fbcfe8]/20 text-[#fbcfe8] font-bold border border-[#fbcfe8]/40'
+                : 'text-[#cac5ce] hover:text-white'
+            }`}
+            title="Deep view with all member Functions and Calls"
+          >
+            <span className="material-symbols-outlined text-[14px]">code</span>
+            <span>3. Functions</span>
+          </button>
+        </div>
+
+        <GraphFilters
+          filterState={filterState}
+          onFilterChange={setFilterState}
+          onResetFilters={handleResetFilters}
+        />
+
+        {/* Layout Direction Toggle */}
+        <button
+          onClick={() => setLayoutDirection((prev) => (prev === 'TB' ? 'LR' : 'TB'))}
+          className="px-3.5 py-2 rounded-xl bg-[#161820]/95 backdrop-blur-xl border border-[#48454d]/40 hover:border-[#938f98]/80 text-[#cac5ce] hover:text-white transition-colors shadow-md flex items-center gap-1.5 cursor-pointer text-xs font-mono select-none"
+          title={`Switch layout to ${layoutDirection === 'TB' ? 'Horizontal (LR)' : 'Vertical (TB)'}`}
+        >
+          <span className="material-symbols-outlined text-[16px]">
+            {layoutDirection === 'TB' ? 'swap_vert' : 'swap_horiz'}
+          </span>
+          <span>{layoutDirection === 'TB' ? 'Vertical' : 'Horizontal'}</span>
+        </button>
+
+        {/* Fit View Quick Action */}
+        <button
+          onClick={() => reactFlowInstance.fitView({ padding: 0.18, duration: 400, maxZoom: 1.05 })}
+          className="px-3 py-2 rounded-xl bg-[#161820]/95 backdrop-blur-xl border border-[#48454d]/40 hover:border-[#938f98]/80 text-[#cac5ce] hover:text-white transition-colors shadow-md flex items-center gap-1.5 cursor-pointer text-xs font-mono select-none"
+          title="Fit view to graph"
+        >
+          <span className="material-symbols-outlined text-[16px]">center_focus_weak</span>
+          <span>Fit</span>
+        </button>
+
+        <GraphLegend />
+
+        {/* Focus Mode Banner / Reset Button */}
+        {focusState.focusedNodeId && (
+          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-[#70485c]/50 border border-[#fbcfe8]/70 text-[#fbcfe8] text-xs font-mono backdrop-blur-xl shadow-lg animate-in fade-in zoom-in-95">
+            <span className="material-symbols-outlined text-[16px]">center_focus_strong</span>
+            <span>Focus Mode Active</span>
+            <button
+              onClick={() => setFocusState(DEFAULT_FOCUS)}
+              className="ml-1 text-[11px] font-bold underline hover:text-white cursor-pointer"
+            >
+              Clear Focus
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Top Right Live Stats & Actions */}
+      <div className="absolute right-6 top-6 z-20 hidden md:flex items-center gap-2.5">
+        {!selectedNodeId && (
+          <div className="px-4 py-2 rounded-xl bg-[#161820]/95 backdrop-blur-xl border border-[#48454d]/40 text-xs font-mono text-[#938f98] shadow-lg flex items-center gap-2.5">
+            <span className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-[#38bdf8] animate-pulse"></span>
+              <strong className="text-white">{viewModel.displayedNodeCount}</strong> nodes
+            </span>
+            <span className="text-[#48454d]">•</span>
+            <span>
+              <strong className="text-white">{viewModel.edges.length}</strong> relationships
+            </span>
+          </div>
+        )}
+      </div>
+
+      {/* Interactive Helper Banner */}
+      <div className="absolute left-6 bottom-6 z-20 px-4 py-2.5 rounded-xl bg-[#161820]/95 backdrop-blur-xl border border-[#48454d]/40 text-xs font-mono text-[#938f98] shadow-2xl flex items-center gap-2 max-w-md">
+        <span className="material-symbols-outlined text-[#fbcfe8] text-[16px]">touch_app</span>
+        <span>
+          Click any <strong>Purpose Node</strong> to expand classes/interfaces. Click any <strong>Class</strong> to unfold its functions.
+        </span>
+      </div>
+
+      {/* Loading Overlay */}
+      {isLoading && (
+        <div className="absolute inset-0 z-30 bg-[#0b0c10]/85 backdrop-blur-md flex flex-col items-center justify-center space-y-4">
+          <div className="w-10 h-10 rounded-full border-2 border-[#fbcfe8] border-t-transparent animate-spin"></div>
+          <span className="text-xs font-mono text-[#b5b1ba] tracking-wider uppercase">
+            Synthesizing Purpose-Driven Architecture Graph...
+          </span>
+        </div>
+      )}
+
+      {/* React Flow Canvas */}
+      <div className="flex-1 w-full h-full">
+        <ReactFlow
+          nodes={viewModel.nodes}
+          edges={viewModel.edges}
+          nodeTypes={nodeTypes}
+          onNodeClick={handleNodeClick}
+          onPaneClick={() => setSelectedNodeId(null)}
+          fitView
+          minZoom={0.2}
+          maxZoom={2.5}
+          defaultEdgeOptions={{ type: 'smoothstep' }}
+          proOptions={{ hideAttribution: true }}
+        >
+          <Background
+            variant={BackgroundVariant.Dots}
+            gap={32}
+            size={1.8}
+            color="#48454d"
+            className="opacity-35"
+          />
+          <Controls position="bottom-right" className="!m-6" showInteractive={false} />
+          <MiniMap
+            position="bottom-left"
+            className="!m-6 !hidden lg:!block !rounded-2xl !overflow-hidden !border !border-[#48454d]/40 !shadow-2xl"
+            nodeColor={(n) => {
+              if (n.type === 'purposeNode') return '#fbcfe8';
+              const symType = (n.data as any)?.type;
+              if (symType === 'class') return '#3b82f6';
+              if (symType === 'interface') return '#10b981';
+              if (symType === 'function') return '#f59e0b';
+              if (symType === 'method') return '#06b6d4';
+              if (symType === 'constructor') return '#8b5cf6';
+              return '#6b7280';
+            }}
+            maskColor="rgba(11, 12, 16, 0.88)"
+          />
+        </ReactFlow>
+      </div>
+
+      {/* Node Details Slide-in Panel */}
+      <SymbolDetailsPanel
+        selectedNode={selectedNodeData}
+        allNodes={apiData?.nodes || []}
+        allEdges={apiData?.edges || []}
+        isFocused={focusState.focusedNodeId === selectedNodeId}
+        onClose={() => setSelectedNodeId(null)}
+        onSelectNode={handleSelectNodeById}
+        onToggleFocus={handleToggleFocus}
+        onExpandNode={handleExpandNode}
+        onSelectFile={onSelectFile}
+        onAskAi={onAskAi}
+        repoName={repo.name}
+      />
     </div>
+  );
+}
+
+export const DependencyGraphView: React.FC<DependencyGraphViewProps> = (props) => {
+  return (
+    <ReactFlowProvider>
+      <InnerCodeGraphView {...props} />
+    </ReactFlowProvider>
   );
 };

@@ -60,6 +60,16 @@ export const IGNORED_EXTENSIONS = new Set([
   '.pyo',
   '.ds_store',
   '.tsbuildinfo',
+  '.woff',
+  '.woff2',
+  '.ttf',
+  '.eot',
+  '.otf',
+  '.sqlite',
+  '.sqlite3',
+  '.db',
+  '.bin',
+  '.map',
 ]);
 
 export const IGNORED_FILENAMES = new Set([
@@ -126,8 +136,17 @@ export function shouldIndexFile(filePath: string): boolean {
     }
   }
 
-  // Check ignored filenames
-  if (IGNORED_FILENAMES.has(filename)) {
+  // Check ignored filenames and declaration/minified patterns
+  if (
+    IGNORED_FILENAMES.has(filename) ||
+    filename.endsWith('.d.ts') ||
+    filename.endsWith('.d.mts') ||
+    filename.endsWith('.d.cts') ||
+    filename.includes('.min.') ||
+    filename.endsWith('.bundle.js') ||
+    filename.endsWith('.chunk.js') ||
+    filename.includes('.generated.')
+  ) {
     return false;
   }
 
@@ -173,3 +192,12 @@ export function detectLanguage(filePath: string): string {
   const ext = path.extname(filename).toLowerCase();
   return EXTENSION_TO_LANGUAGE[ext] || 'Text';
 }
+
+/**
+ * Sanitizes a string for PostgreSQL UTF-8 text storage by stripping null (0x00) bytes.
+ */
+export function sanitizePostgresText(text: string | null | undefined): string {
+  if (!text) return '';
+  return text.replace(/\0/g, '').replace(/\u0000/g, '');
+}
+

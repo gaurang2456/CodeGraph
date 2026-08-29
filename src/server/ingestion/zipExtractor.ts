@@ -1,6 +1,6 @@
 import JSZip from 'jszip';
 import path from 'path';
-import { shouldIndexFile, detectLanguage } from './fileFilter';
+import { shouldIndexFile, detectLanguage, sanitizePostgresText } from './fileFilter';
 
 export interface ExtractedFile {
   filePath: string;
@@ -68,23 +68,18 @@ export async function extractZipArchive(zipBuffer: Buffer | ArrayBuffer): Promis
         throw new Error(`Archive exceeds maximum uncompressed size limit of 100MB.`);
       }
 
-      // Check if file is text/UTF-8 clean
-      if (content.includes('\0')) {
-        // Binary null byte detected
-        continue;
-      }
-
+      const cleanContent = sanitizePostgresText(content);
       const fileName = path.basename(cleanPath);
       const extension = path.extname(fileName).toLowerCase();
       const language = detectLanguage(cleanPath);
-      const lineCount = content.split(/\r\n|\r|\n/).length;
+      const lineCount = cleanContent.split(/\r\n|\r|\n/).length;
 
       extractedFiles.push({
         filePath: cleanPath,
         fileName,
         extension,
         language,
-        content,
+        content: cleanContent,
         lineCount,
       });
     } catch (err: any) {
