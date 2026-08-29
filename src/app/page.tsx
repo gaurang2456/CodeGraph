@@ -46,6 +46,54 @@ export default function Home() {
 
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
 
+  // Global app history stack for back navigation across tabs and views
+  const [navHistory, setNavHistory] = useState<
+    {
+      tab: TabType;
+      selectedFile: string;
+      targetLineRange: { startLine?: number; endLine?: number };
+      activeLayerFilter: { label: string; count: number; files: string[] } | null;
+      showLanding: boolean;
+    }[]
+  >([]);
+
+  const pushNavHistory = () => {
+    setNavHistory((prev) => [
+      ...prev.slice(-29),
+      {
+        tab: activeTab,
+        selectedFile,
+        targetLineRange,
+        activeLayerFilter,
+        showLanding,
+      },
+    ]);
+  };
+
+  const handleGoBack = () => {
+    setNavHistory((prev) => {
+      if (prev.length === 0) return prev;
+      const nextHistory = [...prev];
+      const previousSnapshot = nextHistory.pop()!;
+      setActiveTab(previousSnapshot.tab);
+      setSelectedFile(previousSnapshot.selectedFile);
+      setTargetLineRange(previousSnapshot.targetLineRange);
+      setActiveLayerFilter(previousSnapshot.activeLayerFilter);
+      setShowLanding(previousSnapshot.showLanding);
+      return nextHistory;
+    });
+  };
+
+  const handleTabChange = (newTab: TabType) => {
+    if (newTab !== activeTab) {
+      pushNavHistory();
+      if (newTab !== 'files') {
+        setActiveLayerFilter(null);
+      }
+      setActiveTab(newTab);
+    }
+  };
+
   // Load repositories from real backend on mount
   const fetchRepositories = async () => {
     try {
@@ -119,19 +167,16 @@ export default function Home() {
             setIndexingStatus(repo.status);
             setIndexingError(repo.error_message);
 
-            if (repo.status === 'COMPLETED') {
-              clearInterval(interval);
-              fetchRepositories();
-            } else if (repo.status === 'FAILED') {
+            if (repo.status === 'COMPLETED' || repo.status === 'FAILED') {
               clearInterval(interval);
               fetchRepositories();
             }
           }
         }
       } catch (err) {
-        console.error('Error polling indexing progress:', err);
+        console.error('Polling error:', err);
       }
-    }, 1000);
+    }, 1500);
 
     return () => clearInterval(interval);
   }, [indexingRepoId, isIndexingModalOpen]);
@@ -210,6 +255,7 @@ export default function Home() {
   };
 
   const handleSelectFileFromAnywhere = (filename: string, startLine?: number, endLine?: number) => {
+    pushNavHistory();
     setSelectedFile(filename);
     if (startLine && endLine) {
       setTargetLineRange({ startLine, endLine });
@@ -221,6 +267,7 @@ export default function Home() {
   };
 
   const handleNavigateToArchitectureLayer = (node: ArchitectureFlowNode) => {
+    pushNavHistory();
     setActiveLayerFilter({
       label: node.label,
       count: node.files.length,
@@ -254,6 +301,7 @@ export default function Home() {
         repositories={repositories}
         activeRepo={activeRepo}
         onSelectRepo={(repo) => {
+          pushNavHistory();
           setActiveRepo(repo);
           setShowLanding(false);
         }}
@@ -261,9 +309,12 @@ export default function Home() {
           setUploadInitialTab('zip');
           setIsUploadModalOpen(true);
         }}
-        onNavigateHome={() => setShowLanding(true)}
-        searchQuery={searchQuery}
-        onSearchChange={setSearchQuery}
+        onNavigateHome={() => {
+          pushNavHistory();
+          setShowLanding(true);
+        }}
+        canGoBack={navHistory.length > 0}
+        onGoBack={handleGoBack}
         theme={theme}
         onToggleTheme={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
       />
@@ -290,12 +341,7 @@ export default function Home() {
           {/* Left Sidebar Fixed 260px */}
           <Sidebar
             activeTab={activeTab}
-            onTabChange={(tab) => {
-              if (tab !== 'files') {
-                setActiveLayerFilter(null);
-              }
-              setActiveTab(tab);
-            }}
+            onTabChange={handleTabChange}
             onOpenUploadModal={() => {
               setUploadInitialTab('zip');
               setIsUploadModalOpen(true);

@@ -72,6 +72,45 @@ function InnerCodeGraphView({ repo, onSelectFile, onAskAi }: DependencyGraphView
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [layoutDirection, setLayoutDirection] = useState<'TB' | 'LR'>('TB');
 
+  // History stack for back navigation to last opened state
+  const [history, setHistory] = useState<
+    {
+      hierarchyState: GraphHierarchyState;
+      focusState: GraphFocusState;
+      selectedNodeId: string | null;
+    }[]
+  >([]);
+
+  const pushToHistory = useCallback(() => {
+    setHistory((prev) => [
+      ...prev.slice(-29),
+      {
+        hierarchyState: {
+          expandedPurposeIds: new Set(hierarchyState.expandedPurposeIds),
+          unfoldedNodeIds: new Set(hierarchyState.unfoldedNodeIds),
+          viewLevel: hierarchyState.viewLevel,
+        },
+        focusState: {
+          focusedNodeId: focusState.focusedNodeId,
+          expandedNodeIds: new Set(focusState.expandedNodeIds),
+        },
+        selectedNodeId,
+      },
+    ]);
+  }, [hierarchyState, focusState, selectedNodeId]);
+
+  const handleBack = useCallback(() => {
+    setHistory((prev) => {
+      if (prev.length === 0) return prev;
+      const nextHistory = [...prev];
+      const previousSnapshot = nextHistory.pop()!;
+      setHierarchyState(previousSnapshot.hierarchyState);
+      setFocusState(previousSnapshot.focusState);
+      setSelectedNodeId(previousSnapshot.selectedNodeId);
+      return nextHistory;
+    });
+  }, []);
+
   // 1. Fetch real graph data from GET /api/repositories/[id]/graph
   const fetchGraphData = useCallback(async () => {
     setIsLoading(true);
@@ -101,6 +140,7 @@ function InnerCodeGraphView({ repo, onSelectFile, onAskAi }: DependencyGraphView
 
   // Toggle expanding a Purpose Node (Tier 1 -> Tier 2)
   const handleTogglePurposeExpand = useCallback((purposeId: string) => {
+    pushToHistory();
     setHierarchyState((prev) => {
       const next = new Set(prev.expandedPurposeIds);
       if (next.has(purposeId)) {
@@ -113,10 +153,11 @@ function InnerCodeGraphView({ repo, onSelectFile, onAskAi }: DependencyGraphView
         expandedPurposeIds: next,
       };
     });
-  }, []);
+  }, [pushToHistory]);
 
   // Toggle unfolding methods of a class (Tier 2 -> Tier 3)
   const handleToggleUnfold = useCallback((nodeId: string) => {
+    pushToHistory();
     setHierarchyState((prev) => {
       const next = new Set(prev.unfoldedNodeIds);
       if (next.has(nodeId)) {
@@ -129,17 +170,18 @@ function InnerCodeGraphView({ repo, onSelectFile, onAskAi }: DependencyGraphView
         unfoldedNodeIds: next,
       };
     });
-  }, []);
+  }, [pushToHistory]);
 
   // Set hierarchy view level preset
   const handleSetViewLevel = useCallback((level: 'purpose' | 'classes' | 'full') => {
+    pushToHistory();
     setHierarchyState((prev) => ({
       ...prev,
       viewLevel: level,
       expandedPurposeIds: level === 'purpose' ? new Set() : prev.expandedPurposeIds,
       unfoldedNodeIds: level === 'full' ? prev.unfoldedNodeIds : new Set(),
     }));
-  }, []);
+  }, [pushToHistory]);
 
   // 2. Transform API Data -> React Flow Nodes & Edges on filter, focus, or drilldown change
   const viewModel = useMemo(() => {
@@ -194,11 +236,15 @@ function InnerCodeGraphView({ repo, onSelectFile, onAskAi }: DependencyGraphView
       handleTogglePurposeExpand(purposeId);
       return;
     }
-    setSelectedNodeId(node.id);
-  }, [handleTogglePurposeExpand]);
+    if (node.id !== selectedNodeId) {
+      pushToHistory();
+      setSelectedNodeId(node.id);
+    }
+  }, [handleTogglePurposeExpand, selectedNodeId, pushToHistory]);
 
   const handleSelectNodeById = useCallback(
     (nodeId: string) => {
+      pushToHistory();
       setSelectedNodeId(nodeId);
       // Activate Focus Mode directly to isolate the searched symbol + direct incoming & outgoing neighbors
       setFocusState({
@@ -206,11 +252,12 @@ function InnerCodeGraphView({ repo, onSelectFile, onAskAi }: DependencyGraphView
         expandedNodeIds: new Set<string>(),
       });
     },
-    []
+    [pushToHistory]
   );
 
   // Focus Mode toggling
   const handleToggleFocus = useCallback((nodeId: string) => {
+    pushToHistory();
     setFocusState((prev) => {
       if (prev.focusedNodeId === nodeId) {
         return DEFAULT_FOCUS;
@@ -220,10 +267,11 @@ function InnerCodeGraphView({ repo, onSelectFile, onAskAi }: DependencyGraphView
         expandedNodeIds: new Set<string>(),
       };
     });
-  }, []);
+  }, [pushToHistory]);
 
   // Expand Node in Focus Mode
   const handleExpandNode = useCallback((nodeId: string) => {
+    pushToHistory();
     setFocusState((prev) => {
       const nextExpanded = new Set(prev.expandedNodeIds);
       nextExpanded.add(nodeId);
@@ -232,13 +280,14 @@ function InnerCodeGraphView({ repo, onSelectFile, onAskAi }: DependencyGraphView
         expandedNodeIds: nextExpanded,
       };
     });
-  }, []);
+  }, [pushToHistory]);
 
   const handleResetFilters = useCallback(() => {
+    pushToHistory();
     setFilterState(DEFAULT_FILTERS);
     setFocusState(DEFAULT_FOCUS);
     setHierarchyState(DEFAULT_HIERARCHY);
-  }, []);
+  }, [pushToHistory]);
 
   const selectedNodeData: GraphApiNode | null = useMemo(() => {
     if (!selectedNodeId || !apiData) return null;
@@ -296,6 +345,17 @@ function InnerCodeGraphView({ repo, onSelectFile, onAskAi }: DependencyGraphView
     <div className="w-full h-full min-h-[600px] rounded-3xl border border-[#48454d]/35 bg-[#0b0c10] relative overflow-hidden shadow-2xl flex flex-col">
       {/* Top Floating Glass Command Bar */}
       <div className="absolute left-6 top-6 z-20 flex flex-wrap items-center gap-2.5">
+        {/* Back Navigation Button */}
+        <button
+          onClick={handleBack}
+          disabled={history.length === 0}
+          className="px-3.5 py-2 rounded-xl bg-[#161820]/95 backdrop-blur-xl border border-[#48454d]/40 hover:border-[#fbcfe8]/60 text-[#cac5ce] hover:text-white disabled:opacity-30 disabled:hover:border-[#48454d]/40 disabled:hover:text-[#cac5ce] disabled:cursor-not-allowed transition-all shadow-md flex items-center gap-1.5 cursor-pointer text-xs font-mono select-none"
+          title={history.length > 0 ? 'Back to last opened view' : 'No previous view'}
+        >
+          <span className="material-symbols-outlined text-[16px]">arrow_back</span>
+          <span>Back</span>
+        </button>
+
         <GraphSearch
           nodes={apiData?.nodes || []}
           onSelectNode={handleSelectNodeById}

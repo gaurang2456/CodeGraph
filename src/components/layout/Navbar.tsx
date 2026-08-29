@@ -11,8 +11,10 @@ export interface NavbarProps {
   onSelectRepo: (repo: Repository) => void;
   onOpenUploadModal: () => void;
   onNavigateHome: () => void;
-  searchQuery: string;
-  onSearchChange: (query: string) => void;
+  canGoBack?: boolean;
+  onGoBack?: () => void;
+  searchQuery?: string;
+  onSearchChange?: (query: string) => void;
   theme: 'dark' | 'light';
   onToggleTheme: () => void;
   onToggleRightPanel?: () => void;
@@ -24,6 +26,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   onSelectRepo,
   onOpenUploadModal,
   onNavigateHome,
+  canGoBack = false,
+  onGoBack,
   searchQuery,
   onSearchChange,
   theme,
@@ -93,6 +97,19 @@ export const Navbar: React.FC<NavbarProps> = ({
             CodeGraph
           </span>
         </button>
+
+        {/* Back Navigation Button */}
+        {onGoBack && (
+          <button
+            onClick={onGoBack}
+            disabled={!canGoBack}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-[#1f1f23] hover:bg-[#292a2d] rounded-lg border border-[#48454d]/30 text-xs font-mono text-[#cac5ce] hover:text-white transition-colors cursor-pointer disabled:opacity-30 disabled:hover:bg-[#1f1f23] disabled:hover:text-[#cac5ce] disabled:cursor-not-allowed shadow-sm"
+            title={canGoBack ? 'Go back to last opened view' : 'No previous view'}
+          >
+            <span className="material-symbols-outlined text-[16px]">arrow_back</span>
+            <span>Back</span>
+          </button>
+        )}
 
         {/* Repository Dropdown */}
         <div className="relative">
@@ -197,20 +214,6 @@ export const Navbar: React.FC<NavbarProps> = ({
               </div>
             </div>
           )}
-        </div>
-      </div>
-
-      {/* Center: Global Search Bar */}
-      <div className="flex-1 flex justify-center max-w-xl mx-4">
-        <div className="flex items-center w-full bg-[#292a2d]/50 px-4 py-1.5 rounded-full border border-[#48454d]/20 focus-within:border-[#fbcfe8]/50 transition-all">
-          <span className="material-symbols-outlined text-[18px] text-[#938f98] mr-2">search</span>
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => onSearchChange(e.target.value)}
-            placeholder="Search files, classes, functions..."
-            className="bg-transparent border-none outline-none text-xs sm:text-sm w-full text-[#e3e2e6] placeholder:text-[#938f98]"
-          />
         </div>
       </div>
 

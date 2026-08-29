@@ -379,11 +379,8 @@ export const RepositorySummaryView: React.FC<RepositorySummaryViewProps> = ({
               <button
                 key={idx}
                 onClick={() => onAskQuestion(q)}
-                className="text-xs text-[#cac5ce] hover:text-[#e3e2e6] bg-[#1a1b1e] hover:bg-[#292a2d] border border-[#48454d]/25 hover:border-[#48454d]/50 px-3 py-1.5 rounded-lg transition-all text-left flex items-center gap-1.5"
+                className="text-xs text-[#cac5ce] hover:text-[#e3e2e6] bg-[#1a1b1e] hover:bg-[#292a2d] border border-[#48454d]/25 hover:border-[#48454d]/50 px-3 py-1.5 rounded-lg transition-all text-left cursor-pointer"
               >
-                <span className="material-symbols-outlined text-[14px] text-[#fbcfe8]">
-                  sparkle
-                </span>
                 {q}
               </button>
             ))}
