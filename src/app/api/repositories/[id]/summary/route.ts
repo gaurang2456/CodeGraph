@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { ensureDatabaseSchema, query } from '@/server/db/client';
 import { SummaryService } from '@/server/summary/summaryService';
 import { ExtractedFile } from '@/server/ingestion/zipExtractor';
+import { requireRepositoryAccess, handleAuthApiError } from '@/server/auth/authHelper';
 
 export async function POST(
   req: NextRequest,
@@ -10,13 +11,7 @@ export async function POST(
   try {
     await ensureDatabaseSchema();
     const { id } = await params;
-
-    const repoRes = await query(`SELECT * FROM repositories WHERE id = $1`, [id]);
-    if (repoRes.rows.length === 0) {
-      return NextResponse.json({ error: 'Repository not found.' }, { status: 404 });
-    }
-
-    const repo = repoRes.rows[0];
+    const { repository: repo } = await requireRepositoryAccess(id, req);
 
     // Fetch key manifest & config files from repository_files
     const filesRes = await query(
@@ -61,10 +56,6 @@ export async function POST(
 
     return NextResponse.json({ success: true, summary, technologies: techs });
   } catch (error: any) {
-    console.error('Error generating summary:', error);
-    return NextResponse.json(
-      { error: error?.message || 'Failed to generate summary.' },
-      { status: 500 }
-    );
+    return handleAuthApiError(error);
   }
 }

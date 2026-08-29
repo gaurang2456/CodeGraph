@@ -50,6 +50,10 @@ export default function Home() {
   const fetchRepositories = async () => {
     try {
       const res = await fetch('/api/repositories');
+      if (res.status === 401) {
+        window.location.href = '/login';
+        return;
+      }
       if (res.ok) {
         const data = await res.json();
         const repos: Repository[] = (data.repositories || []).map((r: any) => ({

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { ensureDatabaseSchema, query } from '@/server/db/client';
+import { ensureDatabaseSchema } from '@/server/db/client';
 import { GraphStorage } from '@/server/analyzer/graphStorage';
+import { requireRepositoryAccess, handleAuthApiError } from '@/server/auth/authHelper';
 
 export async function GET(
   req: NextRequest,
@@ -9,12 +10,7 @@ export async function GET(
   try {
     await ensureDatabaseSchema();
     const { id } = await params;
-
-    // Verify repository exists
-    const repoCheck = await query(`SELECT id FROM repositories WHERE id = $1`, [id]);
-    if (repoCheck.rows.length === 0) {
-      return NextResponse.json({ error: 'Repository not found.' }, { status: 404 });
-    }
+    await requireRepositoryAccess(id, req);
 
     const { searchParams } = new URL(req.url);
     const type = searchParams.get('type') || undefined;
@@ -32,10 +28,6 @@ export async function GET(
 
     return NextResponse.json(graphData);
   } catch (error: any) {
-    console.error('Error fetching repository graph:', error);
-    return NextResponse.json(
-      { error: error?.message || 'Failed to fetch repository graph.' },
-      { status: 500 }
-    );
+    return handleAuthApiError(error);
   }
 }

@@ -3,6 +3,7 @@ import { ensureDatabaseSchema, query } from '@/server/db/client';
 import { SummaryService } from '@/server/summary/summaryService';
 import { ExtractedFile } from '@/server/ingestion/zipExtractor';
 import { ParsedChunk } from '@/server/parsing/types';
+import { requireRepositoryAccess, handleAuthApiError } from '@/server/auth/authHelper';
 
 export async function GET(
   req: NextRequest,
@@ -11,13 +12,7 @@ export async function GET(
   try {
     await ensureDatabaseSchema();
     const { id } = await params;
-
-    const repoRes = await query(`SELECT * FROM repositories WHERE id = $1`, [id]);
-    if (repoRes.rows.length === 0) {
-      return NextResponse.json({ error: 'Repository not found.' }, { status: 404 });
-    }
-
-    const repo = repoRes.rows[0];
+    const { repository: repo } = await requireRepositoryAccess(id, req);
 
     // If already generated in summary, return it immediately
     if (repo.summary && repo.summary.architectureFlow && repo.summary.architectureFlow.nodes?.length > 0) {
@@ -61,28 +56,25 @@ export async function GET(
 
     const frameworkInfo = SummaryService.detectFrameworkAndAdapter(files);
     const techs = SummaryService.detectTechnologies(files, frameworkInfo);
-    const architectureFlow = SummaryService.generateArchitectureFlow(files, chunks, techs, frameworkInfo);
+    const flow = SummaryService.generateArchitectureFlow(files, chunks, techs, frameworkInfo);
 
-    // Save back to repository summary
-    const updatedSummary = {
-      ...(repo.summary || {}),
-      architectureFlow,
-    };
+    // Cache to summary in background
+    if (flow.nodes.length > 0) {
+      const updatedSummary = {
+        ...(repo.summary || {}),
+        architectureFlow: flow,
+      };
+      await query(
+        `UPDATE repositories
+         SET summary = $2::jsonb,
+             updated_at = NOW()
+         WHERE id = $1`,
+        [id, JSON.stringify(updatedSummary)]
+      );
+    }
 
-    await query(
-      `UPDATE repositories
-       SET summary = $2::jsonb,
-           updated_at = NOW()
-       WHERE id = $1`,
-      [id, JSON.stringify(updatedSummary)]
-    );
-
-    return NextResponse.json(architectureFlow);
-  } catch (err: any) {
-    console.error('Failed to get architecture flow:', err);
-    return NextResponse.json(
-      { error: err?.message || 'Failed to retrieve architecture flow.' },
-      { status: 500 }
-    );
+    return NextResponse.json(flow);
+  } catch (error: any) {
+    return handleAuthApiError(error);
   }
 }

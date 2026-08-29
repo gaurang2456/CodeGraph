@@ -3,31 +3,35 @@ import { ensureDatabaseSchema, query } from '@/server/db/client';
 import { extractZipArchive } from '@/server/ingestion/zipExtractor';
 import { downloadGitHubRepository, parseGitHubUrl } from '@/server/ingestion/githubIngestion';
 import { IndexingPipeline } from '@/server/ingestion/indexingPipeline';
+import { requireUser, handleAuthApiError } from '@/server/auth/authHelper';
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
     await ensureDatabaseSchema();
+    const user = await requireUser(req);
+
+    // Return only repositories belonging to the authenticated user (or legacy dev repos)
     const result = await query(
-      `SELECT id, name, full_name, source_type, github_url, branch, status, stage, progress,
+      `SELECT id, name, full_name, source_type, github_url, branch, user_id, status, stage, progress,
               file_count, folder_count, line_count, token_count, primary_language, framework,
               technologies, summary, stats, error_message, created_at, updated_at
        FROM repositories
-       ORDER BY created_at DESC`
+       WHERE user_id = $1 OR user_id IS NULL
+       ORDER BY created_at DESC`,
+      [user.id]
     );
 
     return NextResponse.json({ repositories: result.rows });
   } catch (error: any) {
-    console.error('Error fetching repositories:', error);
-    return NextResponse.json(
-      { error: error?.message || 'Database connection error' },
-      { status: 500 }
-    );
+    return handleAuthApiError(error);
   }
 }
 
 export async function POST(req: NextRequest) {
   try {
     await ensureDatabaseSchema();
+    const user = await requireUser(req);
+
     const contentType = req.headers.get('content-type') || '';
 
     let repositoryId = `repo-${Date.now()}`;
@@ -79,11 +83,11 @@ export async function POST(req: NextRequest) {
       };
     }
 
-    // Insert initial record with status = PENDING
+    // Insert initial record with authenticated user_id
     await query(
-      `INSERT INTO repositories (id, name, full_name, source_type, github_url, status, stage, progress)
-       VALUES ($1, $2, $3, $4, $5, 'PENDING', 'Pending Ingestion', 0)`,
-      [repositoryId, repoName, fullName, sourceType, githubUrl || null]
+      `INSERT INTO repositories (id, name, full_name, source_type, github_url, user_id, status, stage, progress)
+       VALUES ($1, $2, $3, $4, $5, $6, 'PENDING', 'Pending Ingestion', 0)`,
+      [repositoryId, repoName, fullName, sourceType, githubUrl || null, user.id]
     );
 
     // Launch indexing in background without blocking HTTP response
@@ -104,10 +108,6 @@ export async function POST(req: NextRequest) {
       { status: 201 }
     );
   } catch (error: any) {
-    console.error('Error creating repository:', error);
-    return NextResponse.json(
-      { error: error?.message || 'Failed to ingest repository.' },
-      { status: 500 }
-    );
+    return handleAuthApiError(error);
   }
 }

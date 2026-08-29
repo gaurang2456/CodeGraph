@@ -1,7 +1,9 @@
 'use client';
 
 import React, { useState, useRef, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import { Repository } from '@/types';
+import { createClient } from '@/lib/supabase/client';
 
 export interface NavbarProps {
   repositories: Repository[];
@@ -28,9 +30,27 @@ export const Navbar: React.FC<NavbarProps> = ({
   onToggleTheme,
   onToggleRightPanel
 }) => {
+  const router = useRouter();
   const [isRepoDropdownOpen, setIsRepoDropdownOpen] = useState(false);
   const [isBranchDropdownOpen, setIsBranchDropdownOpen] = useState(false);
+  const [isProfileDropdownOpen, setIsProfileDropdownOpen] = useState(false);
+  const [userEmail, setUserEmail] = useState<string | null>(null);
+
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const profileRef = useRef<HTMLDivElement>(null);
+
+  const supabase = createClient();
+
+  useEffect(() => {
+    // Load authenticated user info
+    const loadUser = async () => {
+      const { data } = await supabase.auth.getUser();
+      if (data?.user?.email) {
+        setUserEmail(data.user.email);
+      }
+    };
+    loadUser();
+  }, [supabase]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -38,16 +58,30 @@ export const Navbar: React.FC<NavbarProps> = ({
         setIsRepoDropdownOpen(false);
         setIsBranchDropdownOpen(false);
       }
+      if (profileRef.current && !profileRef.current.contains(event.target as Node)) {
+        setIsProfileDropdownOpen(false);
+      }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  const handleLogout = async () => {
+    try {
+      await supabase.auth.signOut();
+      router.push('/login');
+      router.refresh();
+    } catch (err) {
+      console.error('Logout error:', err);
+      router.push('/login');
+    }
+  };
+
   return (
     <header className="fixed top-0 left-0 right-0 h-14 bg-[#121316]/90 backdrop-blur-xl border-b border-[#48454d]/20 z-50 flex items-center px-6 gap-6 justify-between select-none">
       {/* Left: Brand & Repo/Branch Selectors */}
       <div className="flex items-center gap-4 min-w-fit" ref={dropdownRef}>
-        {/* Logo & Brand (Matching Stitch header width) */}
+        {/* Logo & Brand */}
         <button
           onClick={onNavigateHome}
           className="flex items-center gap-2.5 min-w-[212px] text-left focus:outline-none group cursor-pointer"
@@ -71,7 +105,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           >
             <span className="material-symbols-outlined text-[16px] text-[#b7c8e1]">source</span>
             <span className="max-w-[160px] truncate">
-              {activeRepo ? activeRepo.name : 'loan-management'}
+              {activeRepo ? activeRepo.name : 'Select Repository'}
             </span>
             <span className="material-symbols-outlined text-[14px] text-[#938f98]">expand_more</span>
           </button>
@@ -79,7 +113,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           {isRepoDropdownOpen && (
             <div className="absolute top-full left-0 mt-2 w-64 bg-[#1a1b1e] rounded-xl border border-[#48454d]/40 p-1.5 shadow-2xl z-50 animate-in fade-in zoom-in-95 duration-100">
               <div className="px-3 py-1.5 text-[10px] font-mono text-[#938f98] uppercase tracking-wider">
-                Repositories ({repositories.length})
+                My Repositories ({repositories.length})
               </div>
               <div className="space-y-0.5 max-h-56 overflow-y-auto">
                 {repositories.map((repo) => (
@@ -104,17 +138,24 @@ export const Navbar: React.FC<NavbarProps> = ({
                     )}
                   </button>
                 ))}
+
+                {repositories.length === 0 && (
+                  <div className="px-3 py-4 text-center text-xs text-[#938f98]">
+                    No repositories found.
+                  </div>
+                )}
               </div>
-              <div className="pt-1 mt-1 border-t border-[#48454d]/20">
+
+              <div className="p-1 border-t border-[#48454d]/30 mt-1">
                 <button
                   onClick={() => {
                     setIsRepoDropdownOpen(false);
                     onOpenUploadModal();
                   }}
-                  className="w-full text-left px-3 py-1.5 rounded-lg text-xs text-[#fbcfe8] hover:bg-[#70485c]/20 flex items-center gap-2 transition-colors font-medium cursor-pointer"
+                  className="w-full py-1.5 px-3 rounded-lg text-xs font-mono font-medium text-[#fbcfe8] bg-[#70485c]/20 hover:bg-[#70485c]/40 border border-[#fbcfe8]/30 flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
                 >
                   <span className="material-symbols-outlined text-[15px]">add</span>
-                  Scan New Repository
+                  <span>Add Repository</span>
                 </button>
               </div>
             </div>
@@ -173,7 +214,7 @@ export const Navbar: React.FC<NavbarProps> = ({
         </div>
       </div>
 
-      {/* Right: Actions */}
+      {/* Right: Actions & User Profile */}
       <div className="flex items-center gap-3 min-w-fit">
         <button
           onClick={onToggleTheme}
@@ -185,9 +226,34 @@ export const Navbar: React.FC<NavbarProps> = ({
           </span>
         </button>
 
-        {/* Profile Avatar */}
-        <div className="w-8 h-8 rounded-full bg-[#fbcfe8] flex items-center justify-center text-[#3d1729] font-medium shadow-sm cursor-pointer hover:bg-[#f9a8d4] transition-colors">
-          <span className="material-symbols-outlined text-[18px]">person</span>
+        {/* User Account Dropdown */}
+        <div className="relative" ref={profileRef}>
+          <button
+            onClick={() => setIsProfileDropdownOpen(!isProfileDropdownOpen)}
+            className="w-8 h-8 rounded-full bg-[#fbcfe8] flex items-center justify-center text-[#3d1729] font-medium shadow-sm cursor-pointer hover:bg-[#f9a8d4] transition-colors focus:outline-none"
+            title={userEmail || 'Account'}
+          >
+            <span className="material-symbols-outlined text-[18px]">person</span>
+          </button>
+
+          {isProfileDropdownOpen && (
+            <div className="absolute top-full right-0 mt-2 w-60 bg-[#1a1b1e] rounded-2xl border border-[#48454d]/40 p-2 shadow-2xl z-50 animate-in fade-in zoom-in-95 duration-100 space-y-2">
+              <div className="px-3 py-2 border-b border-[#48454d]/25">
+                <div className="text-[10px] font-mono text-[#938f98] uppercase tracking-wider">Signed in as</div>
+                <div className="text-xs font-mono font-medium text-white truncate">{userEmail || 'User Account'}</div>
+              </div>
+
+              <div className="p-1">
+                <button
+                  onClick={handleLogout}
+                  className="w-full text-left px-3 py-2 rounded-xl text-xs font-mono text-red-300 hover:bg-red-500/15 hover:text-red-200 flex items-center gap-2 transition-colors cursor-pointer"
+                >
+                  <span className="material-symbols-outlined text-[16px]">logout</span>
+                  <span>Log Out</span>
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </header>

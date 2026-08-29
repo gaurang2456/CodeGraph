@@ -86,6 +86,7 @@ export async function ensureDatabaseSchema(): Promise<void> {
         source_type TEXT NOT NULL,
         github_url TEXT,
         branch TEXT DEFAULT 'main',
+        user_id UUID,
         status TEXT NOT NULL DEFAULT 'PENDING',
         stage TEXT DEFAULT 'Pending',
         progress INTEGER DEFAULT 0,
@@ -102,6 +103,10 @@ export async function ensureDatabaseSchema(): Promise<void> {
         created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
         updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
       );
+
+      -- Add user_id column if table was created in earlier phase
+      ALTER TABLE repositories ADD COLUMN IF NOT EXISTS user_id UUID;
+      CREATE INDEX IF NOT EXISTS idx_repositories_user_id ON repositories(user_id);
 
       -- Repository Files table
       CREATE TABLE IF NOT EXISTS repository_files (

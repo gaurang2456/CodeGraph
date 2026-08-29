@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { ensureDatabaseSchema, query } from '@/server/db/client';
 import { FileTreeNode } from '@/types';
+import { requireRepositoryAccess, handleAuthApiError } from '@/server/auth/authHelper';
 
 export async function GET(
   req: NextRequest,
@@ -9,6 +10,7 @@ export async function GET(
   try {
     await ensureDatabaseSchema();
     const { id } = await params;
+    const { repository } = await requireRepositoryAccess(id, req);
 
     const filesRes = await query(
       `SELECT id, file_path, file_name, extension, language, line_count, content
@@ -18,8 +20,7 @@ export async function GET(
       [id]
     );
 
-    const repoRes = await query(`SELECT name FROM repositories WHERE id = $1`, [id]);
-    const repoName = repoRes.rows[0]?.name || 'repository';
+    const repoName = repository.name || 'repository';
 
     // Build hierarchical file tree from flat paths
     const rootNode: FileTreeNode = {
@@ -62,18 +63,20 @@ export async function GET(
 
         if (!existingChild) {
           existingChild = {
-            id: `node-${currentPath}`,
+            id: currentPath,
             name: part,
             path: currentPath,
             type: isFile ? 'file' : 'folder',
-            language: isFile ? row.language.toLowerCase() : undefined,
-            isOpen: !isFile && i < 2, // default open top 2 levels
+            isOpen: !isFile,
             children: isFile ? undefined : [],
+            language: isFile ? row.language.toLowerCase() : undefined,
           };
           currentNode.children.push(existingChild);
         }
 
-        currentNode = existingChild;
+        if (!isFile) {
+          currentNode = existingChild;
+        }
       }
     }
 
@@ -83,10 +86,6 @@ export async function GET(
       totalFiles: filesRes.rows.length,
     });
   } catch (error: any) {
-    console.error('Error fetching repository files:', error);
-    return NextResponse.json(
-      { error: error?.message || 'Failed to fetch repository files.' },
-      { status: 500 }
-    );
+    return handleAuthApiError(error);
   }
 }

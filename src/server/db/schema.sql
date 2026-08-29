@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS repositories (
   source_type TEXT NOT NULL,
   github_url TEXT,
   branch TEXT DEFAULT 'main',
+  user_id UUID,
   status TEXT NOT NULL DEFAULT 'PENDING',
   stage TEXT DEFAULT 'Pending',
   progress INTEGER DEFAULT 0,
@@ -25,6 +26,8 @@ CREATE TABLE IF NOT EXISTS repositories (
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
+
+CREATE INDEX IF NOT EXISTS idx_repositories_user_id ON repositories(user_id);
 
 -- Repository Files table
 CREATE TABLE IF NOT EXISTS repository_files (

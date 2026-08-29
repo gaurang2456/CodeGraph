@@ -123,6 +123,7 @@ export interface Repository {
   folderCount: number;
   estimatedTokens: number;
   branch: string;
+  userId?: string;
   commitCount?: number;
   status: 'PENDING' | 'DOWNLOADING' | 'EXTRACTING' | 'SCANNING' | 'PARSING' | 'CHUNKING' | 'EMBEDDING' | 'COMPLETED' | 'FAILED' | 'indexed' | 'indexing' | 'error';
   stage?: string;

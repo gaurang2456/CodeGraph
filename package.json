@@ -12,6 +12,8 @@
   "dependencies": {
     "@dagrejs/dagre": "^3.1.1",
     "@google/generative-ai": "^0.24.0",
+    "@supabase/ssr": "^0.12.5",
+    "@supabase/supabase-js": "^2.112.4",
     "@xyflow/react": "^12.11.5",
     "canvas-confetti": "^1.9.4",
     "clsx": "^2.1.1",
