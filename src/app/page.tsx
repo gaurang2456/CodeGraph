@@ -404,6 +404,7 @@ export default function Home() {
               {activeTab === 'analysis' && (
                 <AnalysisView
                   repo={activeRepo}
+                  onSelectFile={handleSelectFileFromAnywhere}
                   onAskAi={handleAskAiFromAnywhere}
                 />
               )}

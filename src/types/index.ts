@@ -155,3 +155,72 @@ export interface IndexingStepStatus {
   progress: number;
   status: 'pending' | 'in_progress' | 'completed';
 }
+
+// AI Feature Planner Types
+export interface FeaturePlanArchitectureItem {
+  symbol: string;
+  filePath: string;
+  reason: string;
+}
+
+export interface FeaturePlanFileToModify {
+  filePath: string;
+  symbols: string[];
+  reason: string;
+  existingReference?: string;
+}
+
+export interface FeaturePlanFileToCreate {
+  filePath: string;
+  purpose: string;
+}
+
+export interface FeaturePlanDependency {
+  name: string;
+  reason: string;
+}
+
+export interface FeaturePlanApiChange {
+  endpoint: string;
+  type: 'NEW ENDPOINT' | 'MODIFIED ENDPOINT' | string;
+  description: string;
+}
+
+export interface FeaturePlanStep {
+  step: number;
+  title: string;
+  description: string;
+  files: string[];
+  symbols: string[];
+}
+
+export interface FeaturePlanEvidence {
+  files: string[];
+  symbols: string[];
+  chunkCount: number;
+}
+
+export interface FeaturePlanData {
+  overview: string;
+  relevantArchitecture: FeaturePlanArchitectureItem[];
+  filesToModify: FeaturePlanFileToModify[];
+  filesToCreate: FeaturePlanFileToCreate[];
+  dependencies: FeaturePlanDependency[];
+  databaseChanges: string[];
+  apiChanges: FeaturePlanApiChange[];
+  implementationSteps: FeaturePlanStep[];
+  potentialSideEffects: string[];
+  evidence: FeaturePlanEvidence;
+}
+
+export interface FeaturePlanRecord {
+  id: string;
+  repositoryId: string;
+  userId?: string;
+  featureRequest: string;
+  planJson: FeaturePlanData;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+}
+

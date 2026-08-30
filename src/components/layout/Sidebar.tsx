@@ -20,7 +20,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'summary', label: 'Summary', icon: 'description' },
     { id: 'graph', label: 'Graph', icon: 'hub' },
     { id: 'files', label: 'Files', icon: 'folder_open' },
-    { id: 'analysis', label: 'Analysis', icon: 'insights' }
+    { id: 'analysis', label: 'Feature Planner', icon: 'architecture' }
   ];
 
   return (

@@ -186,6 +186,21 @@ export async function ensureDatabaseSchema(): Promise<void> {
       CREATE INDEX IF NOT EXISTS idx_code_relationships_repo ON code_relationships(repository_id);
       CREATE INDEX IF NOT EXISTS idx_code_relationships_source ON code_relationships(repository_id, source_symbol_id);
       CREATE INDEX IF NOT EXISTS idx_code_relationships_target ON code_relationships(repository_id, target_symbol_id);
+
+      -- Feature Plans table (AI Feature Planner)
+      CREATE TABLE IF NOT EXISTS feature_plans (
+        id TEXT PRIMARY KEY,
+        repository_id TEXT NOT NULL REFERENCES repositories(id) ON DELETE CASCADE,
+        user_id UUID,
+        feature_request TEXT NOT NULL,
+        plan_json JSONB NOT NULL,
+        status TEXT NOT NULL DEFAULT 'COMPLETED',
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_feature_plans_repo_id ON feature_plans(repository_id);
+      CREATE INDEX IF NOT EXISTS idx_feature_plans_user_id ON feature_plans(user_id);
     `;
 
     await query(schemaSql);
