@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Repository, FeaturePlanRecord, FeaturePlanData } from '@/types';
+import { Repository, FeaturePlanRecord, FeaturePlanData, GeneratedChangeset } from '@/types';
+import { DiffViewer } from './DiffViewer';
 
 export interface AnalysisViewProps {
   repo: Repository;
@@ -26,14 +27,27 @@ const LOADING_STAGES = [
   'Synthesizing repository-aware implementation plan...',
 ];
 
+const CODE_GEN_STAGES = [
+  'Understanding implementation plan...',
+  'Loading repository files from database...',
+  'Analyzing related AST symbols & relationships...',
+  'Generating proposed code implementations...',
+  'Preparing Git-style diff preview...',
+];
+
 export const AnalysisView: React.FC<AnalysisViewProps> = ({ repo, onSelectFile, onAskAi }) => {
   const [featurePrompt, setFeaturePrompt] = useState('');
-  const [isGenerating, setIsGenerating] = useState(false);
+  const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
+  const [isGeneratingCode, setIsGeneratingCode] = useState(false);
   const [loadingStageIdx, setLoadingStageIdx] = useState(0);
+  const [codeGenStageIdx, setCodeGenStageIdx] = useState(0);
   const [currentPlan, setCurrentPlan] = useState<FeaturePlanRecord | null>(null);
   const [previousPlans, setPreviousPlans] = useState<FeaturePlanRecord[]>([]);
+  const [currentChangeset, setCurrentChangeset] = useState<GeneratedChangeset | null>(null);
+  const [allChangesets, setAllChangesets] = useState<GeneratedChangeset[]>([]);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const planContainerRef = useRef<HTMLDivElement>(null);
+  const diffContainerRef = useRef<HTMLDivElement>(null);
 
   // Load previous feature plans for this repository
   const loadPreviousPlans = async () => {
@@ -43,7 +57,6 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({ repo, onSelectFile, 
         const data = await res.json();
         if (data.plans && data.plans.length > 0) {
           setPreviousPlans(data.plans);
-          // Set latest plan as active if none selected
           if (!currentPlan) {
             setCurrentPlan(data.plans[0]);
           }
@@ -54,18 +67,52 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({ repo, onSelectFile, 
     }
   };
 
+  // Load changesets for the selected feature plan
+  const loadChangesetsForPlan = async (planId: string) => {
+    try {
+      const res = await fetch(`/api/feature-plans/${planId}/changesets`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.changesets && data.changesets.length > 0) {
+          setAllChangesets(data.changesets);
+          setCurrentChangeset(data.changesets[0]);
+        } else {
+          setAllChangesets([]);
+          setCurrentChangeset(null);
+        }
+      }
+    } catch (err) {
+      console.warn('Could not fetch changesets for plan:', err);
+    }
+  };
+
   useEffect(() => {
     loadPreviousPlans();
   }, [repo.id]);
 
-  // Loading animation cycle
   useEffect(() => {
-    if (!isGenerating) return;
+    if (currentPlan?.id) {
+      loadChangesetsForPlan(currentPlan.id);
+    }
+  }, [currentPlan?.id]);
+
+  // Plan loading animation cycle
+  useEffect(() => {
+    if (!isGeneratingPlan) return;
     const interval = setInterval(() => {
       setLoadingStageIdx((prev) => (prev + 1) % LOADING_STAGES.length);
     }, 2800);
     return () => clearInterval(interval);
-  }, [isGenerating]);
+  }, [isGeneratingPlan]);
+
+  // Code Gen loading animation cycle
+  useEffect(() => {
+    if (!isGeneratingCode) return;
+    const interval = setInterval(() => {
+      setCodeGenStageIdx((prev) => (prev + 1) % CODE_GEN_STAGES.length);
+    }, 2800);
+    return () => clearInterval(interval);
+  }, [isGeneratingCode]);
 
   const handleGeneratePlan = async (promptToUse?: string) => {
     const text = (promptToUse || featurePrompt).trim();
@@ -74,9 +121,11 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({ repo, onSelectFile, 
       return;
     }
 
-    setIsGenerating(true);
+    setIsGeneratingPlan(true);
     setErrorMsg(null);
     setLoadingStageIdx(0);
+    setCurrentChangeset(null);
+    setAllChangesets([]);
 
     try {
       const res = await fetch(`/api/repositories/${repo.id}/feature-plan`, {
@@ -95,7 +144,6 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({ repo, onSelectFile, 
         setCurrentPlan(data.plan);
         setPreviousPlans((prev) => [data.plan, ...prev.filter((p) => p.id !== data.plan.id)]);
         setFeaturePrompt('');
-        // Scroll plan into view
         setTimeout(() => {
           planContainerRef.current?.scrollIntoView({ behavior: 'smooth' });
         }, 100);
@@ -104,7 +152,83 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({ repo, onSelectFile, 
       console.error('Error generating feature plan:', err);
       setErrorMsg(err?.message || 'An error occurred while generating the plan.');
     } finally {
-      setIsGenerating(false);
+      setIsGeneratingPlan(false);
+    }
+  };
+
+  const handleGenerateCodeChanges = async () => {
+    if (!currentPlan) return;
+    setIsGeneratingCode(true);
+    setErrorMsg(null);
+    setCodeGenStageIdx(0);
+
+    try {
+      const res = await fetch(`/api/feature-plans/${currentPlan.id}/generate-changes`, {
+        method: 'POST',
+      });
+
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error || 'Failed to generate code changes.');
+      }
+
+      const data = await res.json();
+      if (data.changeset) {
+        setCurrentChangeset(data.changeset);
+        setAllChangesets((prev) => [data.changeset, ...prev.filter((c) => c.id !== data.changeset.id)]);
+        setTimeout(() => {
+          diffContainerRef.current?.scrollIntoView({ behavior: 'smooth' });
+        }, 150);
+      }
+    } catch (err: any) {
+      console.error('Error generating code changes:', err);
+      setErrorMsg(err?.message || 'An error occurred while generating code changes.');
+    } finally {
+      setIsGeneratingCode(false);
+    }
+  };
+
+  const handleApproveChangeset = async (changesetId: string) => {
+    try {
+      const res = await fetch(`/api/changesets/${changesetId}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'approved' }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.changeset) {
+          setCurrentChangeset(data.changeset);
+          setAllChangesets((prev) =>
+            prev.map((c) => (c.id === data.changeset.id ? data.changeset : c))
+          );
+        }
+      }
+    } catch (err) {
+      console.error('Error approving changeset:', err);
+    }
+  };
+
+  const handleRejectChangeset = async (changesetId: string) => {
+    try {
+      const res = await fetch(`/api/changesets/${changesetId}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'rejected' }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data.changeset) {
+          setCurrentChangeset(data.changeset);
+          setAllChangesets((prev) =>
+            prev.map((c) => (c.id === data.changeset.id ? data.changeset : c))
+          );
+        }
+      }
+    } catch (err) {
+      console.error('Error rejecting changeset:', err);
     }
   };
 
@@ -124,7 +248,7 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({ repo, onSelectFile, 
                 AI Feature Planner
               </h1>
               <p className="text-xs text-[#938f98]">
-                Plan repository-aware feature implementations using your existing architecture and codebase.
+                Plan repository-aware feature implementations and generate Git-style code changes.
               </p>
             </div>
           </div>
@@ -148,7 +272,7 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({ repo, onSelectFile, 
               onChange={(e) => setFeaturePrompt(e.target.value)}
               placeholder="e.g. Add Google OAuth authentication with token persistence and session refresh"
               rows={3}
-              disabled={isGenerating}
+              disabled={isGeneratingPlan || isGeneratingCode}
               className="w-full bg-[#1c1e26] border border-[#48454d]/40 rounded-2xl p-4 text-xs sm:text-sm text-white placeholder:text-[#6a6770] focus:border-[#fbcfe8]/70 focus:outline-none transition-all shadow-inner font-mono resize-none"
             />
           </div>
@@ -167,7 +291,7 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({ repo, onSelectFile, 
                   setFeaturePrompt(suggestion);
                   handleGeneratePlan(suggestion);
                 }}
-                disabled={isGenerating}
+                disabled={isGeneratingPlan || isGeneratingCode}
                 className="text-[11px] font-mono text-[#cac5ce] hover:text-white bg-[#1c1e26] hover:bg-[#272a36] border border-[#48454d]/30 hover:border-[#fbcfe8]/40 px-3 py-1.5 rounded-xl transition-all text-left cursor-pointer shadow-sm disabled:opacity-50"
               >
                 {suggestion}
@@ -204,10 +328,10 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({ repo, onSelectFile, 
           {/* Submit Button */}
           <button
             onClick={() => handleGeneratePlan()}
-            disabled={isGenerating || !featurePrompt.trim()}
+            disabled={isGeneratingPlan || !featurePrompt.trim()}
             className="py-2.5 px-5 rounded-xl bg-gradient-to-r from-[#70485c] to-[#49273c] hover:from-[#82546c] hover:to-[#573047] border border-[#fbcfe8]/40 text-white text-xs font-mono font-bold transition-all shadow-lg hover:shadow-[#fbcfe8]/20 flex items-center gap-2 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
           >
-            {isGenerating ? (
+            {isGeneratingPlan ? (
               <>
                 <div className="w-4 h-4 rounded-full border-2 border-white border-t-transparent animate-spin" />
                 <span>Analyzing Codebase...</span>
@@ -230,8 +354,8 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({ repo, onSelectFile, 
         )}
       </section>
 
-      {/* Loading Progress State */}
-      {isGenerating && (
+      {/* Loading Progress State for Plan */}
+      {isGeneratingPlan && (
         <section className="bg-[#13151b]/90 border border-[#fbcfe8]/30 rounded-3xl p-8 shadow-2xl flex flex-col items-center justify-center text-center space-y-4 animate-in fade-in">
           <div className="w-12 h-12 rounded-2xl bg-[#241c2c] border border-[#fbcfe8]/50 flex items-center justify-center text-[#fbcfe8] shadow-xl">
             <div className="w-6 h-6 rounded-full border-2 border-[#fbcfe8] border-t-transparent animate-spin" />
@@ -248,29 +372,46 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({ repo, onSelectFile, 
       )}
 
       {/* Structured Implementation Plan Presentation */}
-      {!isGenerating && planData && (
+      {!isGeneratingPlan && planData && (
         <div ref={planContainerRef} className="space-y-6 animate-in fade-in duration-300">
-          {/* Header Bar with PR Button */}
-          <div className="flex items-center justify-between bg-[#161820]/95 border border-[#48454d]/30 rounded-2xl p-4 shadow-xl">
+          {/* Header Bar with PR & Code Gen Action */}
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-[#161820]/95 border border-[#48454d]/30 rounded-2xl p-4 shadow-xl">
             <div className="space-y-0.5">
               <div className="text-[10px] font-mono text-[#938f98] uppercase tracking-wider">
-                Generated Plan For
+                Approved Plan For
               </div>
               <div className="text-sm font-heading font-bold text-white">
                 &ldquo;{currentPlan?.featureRequest}&rdquo;
               </div>
             </div>
 
-            {/* Pull Request Action (Coming Soon) */}
-            <div className="relative group">
+            <div className="flex items-center gap-3">
+              {/* Generate Code Changes Button */}
+              <button
+                onClick={handleGenerateCodeChanges}
+                disabled={isGeneratingCode}
+                className="py-2 px-4 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-500 hover:to-teal-600 border border-emerald-400/40 text-white text-xs font-mono font-bold transition-all shadow-lg flex items-center gap-2 cursor-pointer disabled:opacity-50"
+              >
+                {isGeneratingCode ? (
+                  <>
+                    <div className="w-3.5 h-3.5 rounded-full border-2 border-white border-t-transparent animate-spin" />
+                    <span>Generating Code...</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="material-symbols-outlined text-[16px]">code</span>
+                    <span>Generate Code Changes</span>
+                  </>
+                )}
+              </button>
+
+              {/* Pull Request Action (Coming Soon) */}
               <button
                 disabled
                 className="py-2 px-4 rounded-xl bg-[#1c1e26] border border-[#48454d]/40 text-[#938f98] text-xs font-mono flex items-center gap-2 cursor-not-allowed opacity-70"
                 title="Future CodeGraph workflow: Auto branch and pull request creation"
               >
-                <span className="material-symbols-outlined text-[16px] text-[#938f98]">
-                  commit
-                </span>
+                <span className="material-symbols-outlined text-[16px] text-[#938f98]">commit</span>
                 <span>Create Pull Request</span>
                 <span className="px-1.5 py-0.5 rounded-md bg-[#292a2d] text-[9px] font-bold text-[#fbcfe8] uppercase tracking-wider">
                   Coming Soon
@@ -633,6 +774,41 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({ repo, onSelectFile, 
               ))}
             </div>
           </section>
+        </div>
+      )}
+
+      {/* Loading Progress State for Code Gen */}
+      {isGeneratingCode && (
+        <section className="bg-[#13151b]/90 border border-emerald-500/40 rounded-3xl p-8 shadow-2xl flex flex-col items-center justify-center text-center space-y-4 animate-in fade-in">
+          <div className="w-12 h-12 rounded-2xl bg-emerald-950 border border-emerald-500/50 flex items-center justify-center text-emerald-400 shadow-xl">
+            <div className="w-6 h-6 rounded-full border-2 border-emerald-400 border-t-transparent animate-spin" />
+          </div>
+          <div className="space-y-1">
+            <h3 className="text-sm font-heading font-semibold text-white">
+              {CODE_GEN_STAGES[codeGenStageIdx]}
+            </h3>
+            <p className="text-xs font-mono text-[#938f98]">
+              Generating complete code implementations from approved plan and repository source files
+            </p>
+          </div>
+        </section>
+      )}
+
+      {/* Code Changes Diff Viewer Section */}
+      {!isGeneratingCode && currentChangeset && (
+        <div ref={diffContainerRef} className="pt-4">
+          <DiffViewer
+            changeset={currentChangeset}
+            allChangesets={allChangesets}
+            onSelectChangeset={(id) => {
+              const selected = allChangesets.find((c) => c.id === id);
+              if (selected) setCurrentChangeset(selected);
+            }}
+            onApprove={handleApproveChangeset}
+            onReject={handleRejectChangeset}
+            onRegenerate={handleGenerateCodeChanges}
+            isGenerating={isGeneratingCode}
+          />
         </div>
       )}
     </div>

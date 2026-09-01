@@ -123,3 +123,38 @@ CREATE TABLE IF NOT EXISTS feature_plans (
 CREATE INDEX IF NOT EXISTS idx_feature_plans_repo_id ON feature_plans(repository_id);
 CREATE INDEX IF NOT EXISTS idx_feature_plans_user_id ON feature_plans(user_id);
 
+-- Generated Changesets table (Phase 3 Code Change Generation)
+CREATE TABLE IF NOT EXISTS generated_changesets (
+  id TEXT PRIMARY KEY,
+  feature_plan_id TEXT NOT NULL REFERENCES feature_plans(id) ON DELETE CASCADE,
+  repository_id TEXT NOT NULL REFERENCES repositories(id) ON DELETE CASCADE,
+  user_id UUID,
+  version INTEGER NOT NULL DEFAULT 1,
+  parent_changeset_id TEXT REFERENCES generated_changesets(id) ON DELETE SET NULL,
+  status TEXT NOT NULL DEFAULT 'ready', -- 'generating' | 'ready' | 'approved' | 'rejected'
+  summary TEXT NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_changesets_plan_id ON generated_changesets(feature_plan_id);
+CREATE INDEX IF NOT EXISTS idx_changesets_repo_id ON generated_changesets(repository_id);
+CREATE INDEX IF NOT EXISTS idx_changesets_user_id ON generated_changesets(user_id);
+CREATE INDEX IF NOT EXISTS idx_changesets_version ON generated_changesets(feature_plan_id, version DESC);
+
+-- Generated File Changes table
+CREATE TABLE IF NOT EXISTS generated_file_changes (
+  id TEXT PRIMARY KEY,
+  changeset_id TEXT NOT NULL REFERENCES generated_changesets(id) ON DELETE CASCADE,
+  file_path TEXT NOT NULL,
+  change_type TEXT NOT NULL, -- 'modify' | 'create' | 'delete'
+  reason TEXT NOT NULL,
+  original_content TEXT,
+  proposed_content TEXT NOT NULL,
+  affected_symbols JSONB DEFAULT '[]'::jsonb,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_file_changes_changeset_id ON generated_file_changes(changeset_id);
+CREATE INDEX IF NOT EXISTS idx_file_changes_path ON generated_file_changes(changeset_id, file_path);
+

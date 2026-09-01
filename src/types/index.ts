@@ -224,3 +224,35 @@ export interface FeaturePlanRecord {
   updatedAt: string;
 }
 
+// Phase 3 AI Code Change Generation Types
+export type ChangesetStatus = 'generating' | 'ready' | 'approved' | 'rejected';
+
+export interface GeneratedFileChange {
+  id: string;
+  changesetId: string;
+  filePath: string;
+  changeType: 'modify' | 'create' | 'delete';
+  reason: string;
+  originalContent?: string | null;
+  proposedContent: string;
+  affectedSymbols: string[];
+  createdAt: string;
+}
+
+export interface GeneratedChangeset {
+  id: string;
+  featurePlanId: string;
+  repositoryId: string;
+  userId?: string;
+  version: number;
+  parentChangesetId?: string | null;
+  status: ChangesetStatus;
+  summary: string;
+  changes: GeneratedFileChange[];
+  additionalRequiredChanges?: string[];
+  warnings?: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+
