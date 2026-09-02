@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
-import { GeneratedChangeset, GeneratedFileChange } from '@/types';
+import React, { useState, useMemo, useEffect } from 'react';
+import { GeneratedChangeset, GeneratedFileChange, ValidationResult, ValidationStatus } from '@/types';
 import { computeLineDiff, calculateDiffStats, DiffLine } from '@/server/planner/diffUtils';
 
 export interface DiffViewerProps {
@@ -13,6 +13,16 @@ export interface DiffViewerProps {
   onRegenerate?: () => Promise<void>;
   isGenerating?: boolean;
 }
+
+const VALIDATION_PROGRESS_STAGES = [
+  'Preparing validation workspace...',
+  'Reconstructing repository from database...',
+  'Applying generated code changes...',
+  'Running TypeScript type checks...',
+  'Building production artifacts...',
+  'Executing automated tests...',
+  'Cleaning up temporary workspace...',
+];
 
 export const DiffViewer: React.FC<DiffViewerProps> = ({
   changeset,
@@ -28,7 +38,73 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
 
-  const currentFile: GeneratedFileChange | undefined = changeset.changes[selectedFileIdx] || changeset.changes[0];
+  // Validation State
+  const [isValidating, setIsValidating] = useState(false);
+  const [valProgressIdx, setValProgressIdx] = useState(0);
+  const [validationResult, setValidationResult] = useState<ValidationResult | null>(null);
+  const [expandedLogChecks, setExpandedLogChecks] = useState<Record<string, boolean>>({});
+
+  const currentFile: GeneratedFileChange | undefined =
+    changeset.changes[selectedFileIdx] || changeset.changes[0];
+
+  // Load existing validation for this changeset
+  const loadValidation = async (csId: string) => {
+    try {
+      const res = await fetch(`/api/changesets/${csId}/validation`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.validation) {
+          setValidationResult(data.validation);
+        } else {
+          setValidationResult(null);
+        }
+      }
+    } catch (err) {
+      console.warn('Could not load validation for changeset:', err);
+    }
+  };
+
+  useEffect(() => {
+    if (changeset.id) {
+      loadValidation(changeset.id);
+    }
+  }, [changeset.id]);
+
+  // Validation progress animation
+  useEffect(() => {
+    if (!isValidating) return;
+    const interval = setInterval(() => {
+      setValProgressIdx((prev) => (prev + 1) % VALIDATION_PROGRESS_STAGES.length);
+    }, 2400);
+    return () => clearInterval(interval);
+  }, [isValidating]);
+
+  const handleRunValidation = async () => {
+    setIsValidating(true);
+    setValProgressIdx(0);
+    try {
+      const res = await fetch(`/api/changesets/${changeset.id}/validate`, {
+        method: 'POST',
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.validation) {
+          setValidationResult(data.validation);
+        }
+      }
+    } catch (err) {
+      console.error('Validation error:', err);
+    } finally {
+      setIsValidating(false);
+    }
+  };
+
+  const toggleCheckLogs = (checkName: string) => {
+    setExpandedLogChecks((prev) => ({
+      ...prev,
+      [checkName]: !prev[checkName],
+    }));
+  };
 
   // Calculate line diffs for selected file
   const diffLines: DiffLine[] = useMemo(() => {
@@ -78,6 +154,8 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
       setIsUpdatingStatus(false);
     }
   };
+
+  const isReadyForPR = changeset.status === 'approved' && validationResult?.status === 'passed';
 
   const statusBadge = () => {
     switch (changeset.status) {
@@ -151,11 +229,31 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
             </select>
           )}
 
+          {/* Run Validation Button */}
+          <button
+            onClick={handleRunValidation}
+            disabled={isValidating || isGenerating}
+            className="py-1.5 px-3.5 rounded-xl bg-gradient-to-r from-blue-600/90 to-indigo-600/90 hover:from-blue-500 hover:to-indigo-500 border border-blue-400/40 text-white text-xs font-mono font-bold transition-all shadow-md flex items-center gap-1.5 cursor-pointer disabled:opacity-40"
+            title="Execute typecheck, build, and tests in an isolated workspace"
+          >
+            {isValidating ? (
+              <>
+                <div className="w-3.5 h-3.5 rounded-full border-2 border-white border-t-transparent animate-spin" />
+                <span>Validating...</span>
+              </>
+            ) : (
+              <>
+                <span className="material-symbols-outlined text-[15px]">verified</span>
+                <span>Run Validation</span>
+              </>
+            )}
+          </button>
+
           {/* Regenerate Button */}
           {onRegenerate && (
             <button
               onClick={onRegenerate}
-              disabled={isGenerating || isUpdatingStatus}
+              disabled={isGenerating || isUpdatingStatus || isValidating}
               className="py-1.5 px-3 rounded-xl bg-[#1c1e26] hover:bg-[#292a2d] border border-[#48454d]/40 text-xs font-mono text-[#cac5ce] hover:text-white transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-40"
               title="Generate a new changeset version without overwriting existing versions"
             >
@@ -168,7 +266,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
           {changeset.status !== 'approved' && onApprove && (
             <button
               onClick={() => handleStatusUpdate('approved')}
-              disabled={isUpdatingStatus || isGenerating}
+              disabled={isUpdatingStatus || isGenerating || isValidating}
               className="py-1.5 px-3.5 rounded-xl bg-emerald-600/90 hover:bg-emerald-500 border border-emerald-400/40 text-white text-xs font-mono font-bold transition-all shadow-md flex items-center gap-1.5 cursor-pointer disabled:opacity-40"
             >
               <span className="material-symbols-outlined text-[16px]">check</span>
@@ -179,7 +277,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
           {changeset.status !== 'rejected' && onReject && (
             <button
               onClick={() => handleStatusUpdate('rejected')}
-              disabled={isUpdatingStatus || isGenerating}
+              disabled={isUpdatingStatus || isGenerating || isValidating}
               className="py-1.5 px-3 rounded-xl bg-[#1c1e26] hover:bg-rose-500/20 border border-[#48454d]/40 hover:border-rose-500/40 text-[#cac5ce] hover:text-rose-200 text-xs font-mono transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-40"
             >
               <span className="material-symbols-outlined text-[15px]">close</span>
@@ -189,18 +287,237 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
         </div>
       </div>
 
-      {/* Approved Notice Banner */}
-      {changeset.status === 'approved' && (
-        <div className="p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-200 text-xs font-mono flex items-center justify-between animate-in fade-in">
-          <div className="flex items-center gap-2">
-            <span className="material-symbols-outlined text-[20px] text-emerald-400">verified</span>
-            <div>
-              <strong>Changes Approved</strong> — Ready for GitHub Pull Request creation.
+      {/* Validation Progress Card */}
+      {isValidating && (
+        <div className="p-5 rounded-2xl bg-blue-950/40 border border-blue-500/40 space-y-3 animate-in fade-in">
+          <div className="flex items-center gap-3">
+            <div className="w-6 h-6 rounded-full border-2 border-blue-400 border-t-transparent animate-spin" />
+            <div className="space-y-0.5">
+              <div className="text-xs font-mono font-bold text-blue-200">
+                {VALIDATION_PROGRESS_STAGES[valProgressIdx]}
+              </div>
+              <div className="text-[11px] font-mono text-[#938f98]">
+                Reconstructing repository in isolated workspace and executing tests
+              </div>
             </div>
           </div>
-          <span className="text-[10px] text-emerald-300/80">Snapshot preserved as v{changeset.version}</span>
         </div>
       )}
+
+      {/* Validation Result Report Card */}
+      {!isValidating && validationResult && (
+        <div className="p-5 rounded-2xl bg-[#161820] border border-[#48454d]/35 space-y-4 animate-in fade-in">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <span className="material-symbols-outlined text-[18px] text-blue-400">
+                science
+              </span>
+              <h3 className="text-xs font-mono font-bold text-white uppercase tracking-wider">
+                Code Validation Report
+              </h3>
+            </div>
+
+            {validationResult.status === 'passed' && (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-[11px] font-mono font-bold">
+                <span className="material-symbols-outlined text-[14px]">check</span>
+                <span>VALIDATION PASSED</span>
+              </span>
+            )}
+            {validationResult.status === 'failed' && (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-rose-500/20 border border-rose-500/40 text-rose-300 text-[11px] font-mono font-bold">
+                <span className="material-symbols-outlined text-[14px]">close</span>
+                <span>VALIDATION FAILED</span>
+              </span>
+            )}
+            {validationResult.status === 'skipped' && (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-300 text-[11px] font-mono font-bold">
+                <span className="material-symbols-outlined text-[14px]">do_not_disturb_on</span>
+                <span>VALIDATION SKIPPED</span>
+              </span>
+            )}
+            {validationResult.status === 'error' && (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-rose-500/20 border border-rose-500/40 text-rose-300 text-[11px] font-mono font-bold">
+                <span className="material-symbols-outlined text-[14px]">warning</span>
+                <span>VALIDATION ERROR</span>
+              </span>
+            )}
+          </div>
+
+          <p className="text-xs text-[#cac5ce] font-sans leading-relaxed">
+            {validationResult.summary}
+          </p>
+
+          {/* Validation Checks Table */}
+          <div className="divide-y divide-[#48454d]/20 border border-[#48454d]/25 rounded-xl overflow-hidden bg-[#121316]">
+            {validationResult.checks.map((check, cIdx) => {
+              const isExpanded = expandedLogChecks[check.name] || false;
+              const hasErrors = check.errors && check.errors.length > 0;
+
+              return (
+                <div key={cIdx} className="p-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2.5">
+                      {check.status === 'passed' && (
+                        <span className="material-symbols-outlined text-[16px] text-emerald-400">
+                          check_circle
+                        </span>
+                      )}
+                      {check.status === 'failed' && (
+                        <span className="material-symbols-outlined text-[16px] text-rose-400">
+                          cancel
+                        </span>
+                      )}
+                      {check.status === 'skipped' && (
+                        <span className="material-symbols-outlined text-[16px] text-amber-400">
+                          do_not_disturb_on
+                        </span>
+                      )}
+                      {check.status === 'error' && (
+                        <span className="material-symbols-outlined text-[16px] text-rose-400">
+                          error
+                        </span>
+                      )}
+                      <span className="text-xs font-mono font-bold text-[#e3e2e6]">
+                        {check.name}
+                      </span>
+                      {check.command && (
+                        <span className="text-[10px] font-mono text-[#6a6770]">
+                          ({check.command})
+                        </span>
+                      )}
+                      {check.status === 'skipped' && (
+                        <span className="px-1.5 py-0.2 rounded text-[9px] font-mono bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                          Skipped
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-3">
+                      {check.durationMs !== undefined && check.durationMs > 0 && (
+                        <span className="text-[10px] font-mono text-[#938f98]">
+                          {(check.durationMs / 1000).toFixed(1)}s
+                        </span>
+                      )}
+                      {check.output && (
+                        <button
+                          onClick={() => toggleCheckLogs(check.name)}
+                          className="text-[10px] font-mono text-blue-400 hover:text-blue-300 transition-colors cursor-pointer"
+                        >
+                          {isExpanded ? 'Hide Logs' : 'View Logs'}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {check.message && (
+                    <div className="text-[11px] font-mono text-[#cac5ce] pl-6">
+                      {check.message}
+                    </div>
+                  )}
+
+                  {/* Formatted Errors */}
+                  {hasErrors && (
+                    <div className="space-y-1.5 pl-6">
+                      {check.errors?.map((err, eIdx) => (
+                        <div
+                          key={eIdx}
+                          className="p-2 rounded-lg bg-rose-500/10 border border-rose-500/25 text-[11px] font-mono text-rose-200"
+                        >
+                          {err.filePath && (
+                            <span className="font-bold text-rose-300 mr-1.5">
+                              {err.filePath}
+                              {err.line ? `:${err.line}` : ''}
+                            </span>
+                          )}
+                          <span>{err.message}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Expandable Full Console Output */}
+                  {isExpanded && check.output && (
+                    <div className="mt-2 p-3 rounded-xl bg-[#090a0d] border border-[#48454d]/30 text-[10px] font-mono text-[#b7c8e1] overflow-x-auto max-h-48 whitespace-pre custom-scrollbar">
+                      {check.output
+                        .replace(/[\u001b\x1b]\[[0-9;?]*[ -/]*[@-~]/g, '')
+                        .replace(/[\u001b\x1b]\].*?(?:\u0007|[\u001b\x1b]\\)/g, '')
+                        .replace(/(?:\[(?:\d{1,3}(?:;\d{1,3})*)?m)+/g, '')}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* PR Readiness Banner */}
+      {isReadyForPR ? (
+        <div className="p-4 rounded-2xl bg-gradient-to-r from-emerald-950/80 to-teal-950/80 border border-emerald-400/40 text-emerald-200 text-xs font-mono flex items-center justify-between shadow-lg animate-in fade-in">
+          <div className="flex items-center gap-2.5">
+            <span className="material-symbols-outlined text-[22px] text-emerald-400">
+              verified
+            </span>
+            <div>
+              <strong className="text-white text-sm">Ready for GitHub Pull Request</strong>
+              <div className="text-[11px] text-emerald-300/80">
+                Changeset approved and verified against type checking, builds, and tests.
+              </div>
+            </div>
+          </div>
+          <span className="px-2.5 py-1 rounded-lg bg-emerald-500/20 text-[10px] font-bold text-emerald-300 uppercase tracking-wider border border-emerald-400/30">
+            PR Ready
+          </span>
+        </div>
+      ) : changeset.status === 'approved' && validationResult?.status === 'skipped' ? (
+        <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs font-mono flex items-center justify-between animate-in fade-in">
+          <div className="flex items-center gap-2">
+            <span className="material-symbols-outlined text-[18px] text-amber-400">
+              info
+            </span>
+            <span>
+              <strong>Changes Approved</strong> (Automated validation was skipped because TypeScript or test dependencies are not installed in this repository).
+            </span>
+          </div>
+          <span className="px-2.5 py-1 rounded-lg bg-amber-500/20 text-[10px] font-bold text-amber-300 uppercase tracking-wider border border-amber-400/30">
+            Validation Skipped
+          </span>
+        </div>
+      ) : changeset.status === 'approved' && validationResult?.status === 'failed' ? (
+        <div className="p-3.5 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-200 text-xs font-mono flex items-center justify-between animate-in fade-in">
+          <div className="flex items-center gap-2">
+            <span className="material-symbols-outlined text-[18px] text-rose-400">
+              cancel
+            </span>
+            <span>
+              <strong>Validation Failed</strong> — Compiler or test errors must be resolved before creating a Pull Request.
+            </span>
+          </div>
+          <button
+            onClick={handleRunValidation}
+            className="px-2.5 py-1 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-[10px] font-bold text-rose-300 uppercase tracking-wider transition-colors cursor-pointer"
+          >
+            Re-run Validation
+          </button>
+        </div>
+      ) : changeset.status === 'approved' && !validationResult ? (
+        <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs font-mono flex items-center justify-between animate-in fade-in">
+          <div className="flex items-center gap-2">
+            <span className="material-symbols-outlined text-[18px] text-amber-400">
+              warning
+            </span>
+            <span>
+              <strong>Changes Approved</strong>, but validation has not been run yet.
+            </span>
+          </div>
+          <button
+            onClick={handleRunValidation}
+            className="px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-[10px] font-bold text-amber-300 uppercase tracking-wider transition-colors cursor-pointer"
+          >
+            Run Validation
+          </button>
+        </div>
+      ) : null}
 
       {/* Changeset Overview Stats */}
       <div className="flex items-center justify-between text-xs font-mono text-[#938f98] px-1">

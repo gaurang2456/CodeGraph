@@ -158,3 +158,20 @@ CREATE TABLE IF NOT EXISTS generated_file_changes (
 CREATE INDEX IF NOT EXISTS idx_file_changes_changeset_id ON generated_file_changes(changeset_id);
 CREATE INDEX IF NOT EXISTS idx_file_changes_path ON generated_file_changes(changeset_id, file_path);
 
+-- Changeset Validations table (Phase 3 Code Validation & Testing)
+CREATE TABLE IF NOT EXISTS changeset_validations (
+  id TEXT PRIMARY KEY,
+  changeset_id TEXT NOT NULL REFERENCES generated_changesets(id) ON DELETE CASCADE,
+  repository_id TEXT NOT NULL REFERENCES repositories(id) ON DELETE CASCADE,
+  user_id UUID,
+  status TEXT NOT NULL DEFAULT 'pending', -- 'pending' | 'running' | 'passed' | 'failed' | 'error'
+  result JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  completed_at TIMESTAMP WITH TIME ZONE
+);
+
+CREATE INDEX IF NOT EXISTS idx_validations_changeset_id ON changeset_validations(changeset_id);
+CREATE INDEX IF NOT EXISTS idx_validations_repo_id ON changeset_validations(repository_id);
+CREATE INDEX IF NOT EXISTS idx_validations_user_id ON changeset_validations(user_id);
+
+

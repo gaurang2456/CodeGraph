@@ -255,4 +255,45 @@ export interface GeneratedChangeset {
   updatedAt: string;
 }
 
+// Phase 3 Part 2: Generated Code Validation & Testing Types
+export type ValidationStatus = 'pending' | 'running' | 'passed' | 'failed' | 'skipped' | 'error';
+export type ValidationCheckType = 'typecheck' | 'build' | 'test';
+
+export interface ValidationError {
+  filePath?: string;
+  line?: number;
+  column?: number;
+  message: string;
+  severity: 'error' | 'warning';
+}
+
+export interface ValidationCheck {
+  type: ValidationCheckType;
+  name: string;
+  status: ValidationStatus;
+  command?: string;
+  exitCode?: number;
+  durationMs?: number;
+  output?: string;
+  errorCount?: number;
+  message?: string;
+  errors?: ValidationError[];
+}
+
+export interface ValidationResult {
+  id: string;
+  changesetId: string;
+  repositoryId: string;
+  userId?: string;
+  status: ValidationStatus;
+  overallStatus?: ValidationStatus;
+  summary?: string;
+  checks: ValidationCheck[];
+  startedAt?: string;
+  completedAt?: string;
+  createdAt: string;
+}
+
+
+
 
