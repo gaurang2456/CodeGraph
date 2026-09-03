@@ -301,3 +301,49 @@ export interface GitHubConnectionStatus {
   avatarUrl?: string;
   connectedAt?: string;
 }
+
+// Phase 4.1 & 4.2: GitHub Branch & Commit Types
+export interface ChangesetBranch {
+  id: string;
+  changesetId: string;
+  repositoryId: string;
+  userId?: string;
+  githubRepoOwner: string;
+  githubRepoName: string;
+  branchName: string;
+  baseBranch: string;
+  baseSha: string;
+  stagedTreeSha?: string;
+  commitSha?: string;
+  commitMessage?: string;
+  committedAt?: string;
+  status: 'created' | 'staged' | 'committed' | 'pr_created';
+  fileCount: number;
+  htmlUrl?: string;
+  commitUrl?: string;
+  metadata?: Record<string, any>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// Phase 4.3: GitHub Pull Request Types
+export interface PullRequestRecord {
+  id: string;
+  changesetId: string;
+  repositoryId: string;
+  userId?: string;
+  githubRepoOwner: string;
+  githubRepoName: string;
+  githubPrNumber: number;
+  githubPrUrl: string;
+  githubPrApiUrl?: string;
+  branchName: string;
+  baseBranch: string;
+  commitSha: string;
+  title: string;
+  body?: string;
+  status: 'open' | 'closed' | 'merged';
+  metadata?: Record<string, any>;
+  createdAt: string;
+  updatedAt: string;
+}

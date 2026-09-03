@@ -188,5 +188,58 @@ CREATE TABLE IF NOT EXISTS github_connections (
 
 CREATE INDEX IF NOT EXISTS idx_github_connections_user_id ON github_connections(user_id);
 
+-- Changeset Branches table (Phase 4.1 & 4.2 GitHub Branch & Commit Staging)
+CREATE TABLE IF NOT EXISTS changeset_branches (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  changeset_id TEXT NOT NULL REFERENCES generated_changesets(id) ON DELETE CASCADE,
+  repository_id TEXT NOT NULL REFERENCES repositories(id) ON DELETE CASCADE,
+  user_id UUID,
+  github_repo_owner TEXT NOT NULL,
+  github_repo_name TEXT NOT NULL,
+  branch_name TEXT NOT NULL,
+  base_branch TEXT NOT NULL,
+  base_sha TEXT NOT NULL,
+  staged_tree_sha TEXT,
+  commit_sha TEXT,
+  commit_message TEXT,
+  committed_at TIMESTAMP WITH TIME ZONE,
+  status TEXT NOT NULL DEFAULT 'staged', -- 'created' | 'staged' | 'committed' | 'pr_created'
+  file_count INTEGER DEFAULT 0,
+  metadata JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  UNIQUE(changeset_id, branch_name)
+);
 
+CREATE INDEX IF NOT EXISTS idx_changeset_branches_changeset_id ON changeset_branches(changeset_id);
+CREATE INDEX IF NOT EXISTS idx_changeset_branches_repo_id ON changeset_branches(repository_id);
+CREATE INDEX IF NOT EXISTS idx_changeset_branches_user_id ON changeset_branches(user_id);
+CREATE INDEX IF NOT EXISTS idx_changeset_branches_commit_sha ON changeset_branches(commit_sha);
 
+-- Pull Requests table (Phase 4.3 GitHub Pull Request Creation & Status Tracking)
+CREATE TABLE IF NOT EXISTS pull_requests (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  changeset_id TEXT NOT NULL REFERENCES generated_changesets(id) ON DELETE CASCADE,
+  repository_id TEXT NOT NULL REFERENCES repositories(id) ON DELETE CASCADE,
+  user_id UUID,
+  github_repo_owner TEXT NOT NULL,
+  github_repo_name TEXT NOT NULL,
+  github_pr_number INTEGER NOT NULL,
+  github_pr_url TEXT NOT NULL,
+  github_pr_api_url TEXT,
+  branch_name TEXT NOT NULL,
+  base_branch TEXT NOT NULL,
+  commit_sha TEXT NOT NULL,
+  title TEXT NOT NULL,
+  body TEXT,
+  status TEXT NOT NULL DEFAULT 'open', -- 'open' | 'closed' | 'merged'
+  metadata JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  UNIQUE(changeset_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_pull_requests_changeset_id ON pull_requests(changeset_id);
+CREATE INDEX IF NOT EXISTS idx_pull_requests_repo_id ON pull_requests(repository_id);
+CREATE INDEX IF NOT EXISTS idx_pull_requests_user_id ON pull_requests(user_id);
+CREATE INDEX IF NOT EXISTS idx_pull_requests_pr_number ON pull_requests(github_repo_owner, github_repo_name, github_pr_number);

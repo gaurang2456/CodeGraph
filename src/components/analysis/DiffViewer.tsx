@@ -1,6 +1,14 @@
 'use client';
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { GeneratedChangeset, GeneratedFileChange, ValidationResult, ValidationStatus, GitHubConnectionStatus } from '@/types';
+import {
+  GeneratedChangeset,
+  GeneratedFileChange,
+  ValidationResult,
+  ValidationStatus,
+  GitHubConnectionStatus,
+  ChangesetBranch,
+  PullRequestRecord,
+} from '@/types';
 import { computeLineDiff, calculateDiffStats, DiffLine } from '@/server/planner/diffUtils';
 import { createClient } from '@/lib/supabase/client';
 
@@ -39,6 +47,14 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   const [copiedCode, setCopiedCode] = useState(false);
   const [githubConnection, setGithubConnection] = useState<GitHubConnectionStatus | null>(null);
   const [isConnectingGitHub, setIsConnectingGitHub] = useState(false);
+  const [changesetBranch, setChangesetBranch] = useState<ChangesetBranch | null>(null);
+  const [isCreatingBranch, setIsCreatingBranch] = useState(false);
+  const [branchError, setBranchError] = useState<string | null>(null);
+  const [isCommitting, setIsCommitting] = useState(false);
+  const [commitError, setCommitError] = useState<string | null>(null);
+  const [pullRequest, setPullRequest] = useState<PullRequestRecord | null>(null);
+  const [isCreatingPr, setIsCreatingPr] = useState(false);
+  const [prError, setPrError] = useState<string | null>(null);
 
   const supabase = createClient();
 
@@ -54,9 +70,100 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
     }
   }, []);
 
+  const loadBranch = useCallback(async (csId: string) => {
+    try {
+      const res = await fetch(`/api/changesets/${csId}/github/branch`);
+      if (res.ok) {
+        const data = await res.json();
+        setChangesetBranch(data.branch || null);
+      }
+    } catch {
+      // Passive fetch
+    }
+  }, []);
+
+  const loadPullRequest = useCallback(async (csId: string) => {
+    try {
+      const res = await fetch(`/api/changesets/${csId}/github/pr`);
+      if (res.ok) {
+        const data = await res.json();
+        setPullRequest(data.pullRequest || null);
+      }
+    } catch {
+      // Passive fetch
+    }
+  }, []);
+
   useEffect(() => {
     loadGitHubConnection();
   }, [loadGitHubConnection]);
+
+  useEffect(() => {
+    if (changeset.id) {
+      loadBranch(changeset.id);
+      loadPullRequest(changeset.id);
+    }
+  }, [changeset.id, loadBranch, loadPullRequest]);
+
+  const handleCreatePullRequest = async () => {
+    setIsCreatingPr(true);
+    setPrError(null);
+    try {
+      const res = await fetch(`/api/changesets/${changeset.id}/github/pr`, {
+        method: 'POST',
+      });
+      const data = await res.json();
+      if (res.ok && data.pullRequest) {
+        setPullRequest(data.pullRequest);
+      } else {
+        setPrError(data.error || 'Failed to create Pull Request.');
+      }
+    } catch (err: any) {
+      setPrError(err.message || 'Network error while creating Pull Request.');
+    } finally {
+      setIsCreatingPr(false);
+    }
+  };
+
+  const handleCreateBranch = async () => {
+    setIsCreatingBranch(true);
+    setBranchError(null);
+    try {
+      const res = await fetch(`/api/changesets/${changeset.id}/github/branch`, {
+        method: 'POST',
+      });
+      const data = await res.json();
+      if (res.ok && data.branch) {
+        setChangesetBranch(data.branch);
+      } else {
+        setBranchError(data.error || 'Failed to create GitHub branch.');
+      }
+    } catch (err: any) {
+      setBranchError(err.message || 'Network error while creating branch.');
+    } finally {
+      setIsCreatingBranch(false);
+    }
+  };
+
+  const handleCommitAndPush = async () => {
+    setIsCommitting(true);
+    setCommitError(null);
+    try {
+      const res = await fetch(`/api/changesets/${changeset.id}/github/commit`, {
+        method: 'POST',
+      });
+      const data = await res.json();
+      if (res.ok && data.branch) {
+        setChangesetBranch(data.branch);
+      } else {
+        setCommitError(data.error || 'Failed to commit and push changes.');
+      }
+    } catch (err: any) {
+      setCommitError(err.message || 'Network error while committing to branch.');
+    } finally {
+      setIsCommitting(false);
+    }
+  };
 
   const handleConnectGitHub = async () => {
     setIsConnectingGitHub(true);
@@ -588,11 +695,34 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
           </div>
         </div>
 
-        <div>
+        <div className="flex items-center gap-2">
           {githubConnection?.connected ? (
-            <span className="px-2.5 py-1 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-[10px] font-bold uppercase tracking-wider">
-              Connected
-            </span>
+            changesetBranch ? (
+              <a
+                href={changesetBranch.htmlUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-3 py-1.5 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 text-[11px] font-mono font-medium flex items-center gap-1.5 transition-colors cursor-pointer"
+                title="View branch on GitHub"
+              >
+                <span className="material-symbols-outlined text-[14px]">open_in_new</span>
+                <span>View on GitHub</span>
+              </a>
+            ) : changeset.status === 'approved' ? (
+              <button
+                onClick={handleCreateBranch}
+                disabled={isCreatingBranch}
+                className="px-3.5 py-1.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-200 text-[11px] font-mono font-medium flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50 shadow-sm"
+                title="Create dedicated feature branch and stage changeset"
+              >
+                <span className="material-symbols-outlined text-[15px]">fork_right</span>
+                <span>{isCreatingBranch ? 'Creating Branch...' : 'Create GitHub Branch'}</span>
+              </button>
+            ) : (
+              <span className="px-2.5 py-1 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-[10px] font-bold uppercase tracking-wider">
+                Connected
+              </span>
+            )
           ) : (
             <button
               onClick={handleConnectGitHub}
@@ -605,6 +735,176 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
           )}
         </div>
       </div>
+
+      {/* GitHub Branch Created / Committed Info Card */}
+      {changesetBranch && (
+        <div className="p-3.5 rounded-2xl bg-gradient-to-r from-[#0d2218]/90 to-[#122820]/90 border border-emerald-500/35 text-emerald-200 text-xs font-mono flex items-center justify-between shadow-lg animate-in fade-in">
+          <div className="flex items-center gap-2.5">
+            <span className="material-symbols-outlined text-[20px] text-emerald-400">
+              {changesetBranch.commitSha ? 'check_circle' : 'fork_right'}
+            </span>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-white font-bold">{changesetBranch.branchName}</span>
+                {changesetBranch.commitSha ? (
+                  <span className="px-2 py-0.5 rounded-md bg-emerald-500/20 text-[9px] font-bold uppercase tracking-wider border border-emerald-400/30 text-emerald-300">
+                    Committed ({changesetBranch.commitSha.slice(0, 7)})
+                  </span>
+                ) : (
+                  <span className="px-2 py-0.5 rounded-md bg-amber-500/20 text-[9px] font-bold uppercase tracking-wider border border-amber-400/30 text-amber-300">
+                    Staged on GitHub
+                  </span>
+                )}
+              </div>
+              <div className="text-[11px] text-emerald-300/80">
+                {changesetBranch.commitSha ? (
+                  <span>
+                    Commit pushed to <span className="font-semibold text-white">{changesetBranch.branchName}</span> • Ready for Phase 4.3 Pull Request
+                  </span>
+                ) : (
+                  <span>
+                    Created from <span className="font-semibold text-white">{changesetBranch.baseBranch}</span> ({changesetBranch.baseSha.slice(0, 7)}) • {changesetBranch.fileCount} files staged
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {!changesetBranch.commitSha ? (
+              <button
+                onClick={handleCommitAndPush}
+                disabled={isCommitting}
+                className="px-3.5 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black text-[11px] font-mono font-bold flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50 shadow-md"
+                title="Create Git commit and push directly to this feature branch"
+              >
+                <span className="material-symbols-outlined text-[15px]">publish</span>
+                <span>{isCommitting ? 'Committing & Pushing...' : 'Commit & Push to Branch'}</span>
+              </button>
+            ) : !pullRequest ? (
+              <button
+                onClick={handleCreatePullRequest}
+                disabled={isCreatingPr}
+                className="px-3.5 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-[11px] font-mono font-bold flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50 shadow-md"
+                title="Create Pull Request targeting repository default branch"
+              >
+                <span className="material-symbols-outlined text-[15px]">merge_type</span>
+                <span>{isCreatingPr ? 'Creating PR...' : 'Create Pull Request'}</span>
+              </button>
+            ) : null}
+
+            {changesetBranch.commitUrl && (
+              <a
+                href={changesetBranch.commitUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-2.5 py-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-200 text-[10px] font-bold uppercase tracking-wider transition-colors flex items-center gap-1 cursor-pointer"
+                title="View commit details on GitHub"
+              >
+                <span>Commit</span>
+                <span className="material-symbols-outlined text-[12px]">north_east</span>
+              </a>
+            )}
+
+            <a
+              href={changesetBranch.htmlUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-2.5 py-1.5 rounded-lg bg-[#292a2d] hover:bg-[#38393e] border border-[#48454d]/30 text-emerald-200 text-[10px] font-bold uppercase tracking-wider transition-colors flex items-center gap-1 cursor-pointer"
+              title="View branch on GitHub"
+            >
+              <span>Branch</span>
+              <span className="material-symbols-outlined text-[12px]">north_east</span>
+            </a>
+          </div>
+        </div>
+      )}
+
+      {/* GitHub Pull Request Card */}
+      {pullRequest && (
+        <div className="p-3.5 rounded-2xl bg-gradient-to-r from-[#1b1028]/95 to-[#241335]/95 border border-purple-500/40 text-purple-200 text-xs font-mono flex items-center justify-between shadow-xl animate-in fade-in">
+          <div className="flex items-center gap-2.5">
+            <span className="material-symbols-outlined text-[22px] text-purple-400">
+              merge_type
+            </span>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-white font-bold">{pullRequest.title}</span>
+                <span className="px-2 py-0.5 rounded-md bg-purple-500/25 text-[9px] font-bold uppercase tracking-wider border border-purple-400/40 text-purple-300">
+                  PR #{pullRequest.githubPrNumber} ({pullRequest.status})
+                </span>
+              </div>
+              <div className="text-[11px] text-purple-300/80">
+                Merging <span className="font-semibold text-white">{pullRequest.branchName}</span> into <span className="font-semibold text-white">{pullRequest.baseBranch}</span> • Commit: {pullRequest.commitSha.slice(0, 7)}
+              </div>
+            </div>
+          </div>
+
+          <a
+            href={pullRequest.githubPrUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="px-3.5 py-1.5 rounded-xl bg-purple-500 hover:bg-purple-400 text-black text-[11px] font-mono font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-md"
+          >
+            <span>View Pull Request</span>
+            <span className="material-symbols-outlined text-[13px]">north_east</span>
+          </a>
+        </div>
+      )}
+
+      {/* PR Error Banner */}
+      {prError && (
+        <div className="p-3.5 rounded-2xl bg-rose-500/10 border border-rose-500/35 text-rose-200 text-xs font-mono flex items-center justify-between shadow-md animate-in fade-in">
+          <div className="flex items-center gap-2">
+            <span className="material-symbols-outlined text-[18px] text-rose-400 shrink-0">
+              warning
+            </span>
+            <span>{prError}</span>
+          </div>
+          <button
+            onClick={() => setPrError(null)}
+            className="text-rose-300/70 hover:text-rose-200 transition-colors p-1 cursor-pointer"
+          >
+            <span className="material-symbols-outlined text-[14px]">close</span>
+          </button>
+        </div>
+      )}
+
+      {/* Commit Error Banner */}
+      {commitError && (
+        <div className="p-3.5 rounded-2xl bg-rose-500/10 border border-rose-500/35 text-rose-200 text-xs font-mono flex items-center justify-between shadow-md animate-in fade-in">
+          <div className="flex items-center gap-2">
+            <span className="material-symbols-outlined text-[18px] text-rose-400 shrink-0">
+              warning
+            </span>
+            <span>{commitError}</span>
+          </div>
+          <button
+            onClick={() => setCommitError(null)}
+            className="text-rose-300/70 hover:text-rose-200 transition-colors p-1 cursor-pointer"
+          >
+            <span className="material-symbols-outlined text-[14px]">close</span>
+          </button>
+        </div>
+      )}
+
+      {/* Branch Creation / Drift Error Banner */}
+      {branchError && (
+        <div className="p-3.5 rounded-2xl bg-rose-500/10 border border-rose-500/35 text-rose-200 text-xs font-mono flex items-center justify-between shadow-md animate-in fade-in">
+          <div className="flex items-center gap-2">
+            <span className="material-symbols-outlined text-[18px] text-rose-400 shrink-0">
+              warning
+            </span>
+            <span>{branchError}</span>
+          </div>
+          <button
+            onClick={() => setBranchError(null)}
+            className="text-rose-300/70 hover:text-rose-200 transition-colors p-1 cursor-pointer"
+          >
+            <span className="material-symbols-outlined text-[14px]">close</span>
+          </button>
+        </div>
+      )}
 
       {/* Changeset Overview Stats */}
       <div className="flex items-center justify-between text-xs font-mono text-[#938f98] px-1">
