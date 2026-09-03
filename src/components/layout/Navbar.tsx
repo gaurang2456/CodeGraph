@@ -4,6 +4,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Repository } from '@/types';
 import { createClient } from '@/lib/supabase/client';
+import { GitHubConnectionCard } from '@/components/github/GitHubConnectionCard';
 
 export interface NavbarProps {
   repositories: Repository[];
@@ -39,11 +40,40 @@ export const Navbar: React.FC<NavbarProps> = ({
   const [isBranchDropdownOpen, setIsBranchDropdownOpen] = useState(false);
   const [isProfileDropdownOpen, setIsProfileDropdownOpen] = useState(false);
   const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [githubNotification, setGithubNotification] = useState<{
+    type: 'success' | 'error';
+    message: string;
+  } | null>(null);
 
   const dropdownRef = useRef<HTMLDivElement>(null);
   const profileRef = useRef<HTMLDivElement>(null);
 
   const supabase = createClient();
+
+  useEffect(() => {
+    // Check for GitHub OAuth callback query parameters
+    if (typeof window !== 'undefined') {
+      const urlParams = new URLSearchParams(window.location.search);
+      if (urlParams.get('github_connected') === 'true') {
+        setGithubNotification({
+          type: 'success',
+          message: 'GitHub account connected successfully! Authorized for repository operations.',
+        });
+        window.history.replaceState({}, '', window.location.pathname);
+      } else if (urlParams.get('github_error')) {
+        const err = urlParams.get('github_error');
+        const safeMsg =
+          err === 'oauth_denied'
+            ? 'GitHub authorization request was cancelled.'
+            : 'Could not connect GitHub account. Please try again.';
+        setGithubNotification({
+          type: 'error',
+          message: safeMsg,
+        });
+        window.history.replaceState({}, '', window.location.pathname);
+      }
+    }
+  }, []);
 
   useEffect(() => {
     // Load authenticated user info
@@ -240,10 +270,15 @@ export const Navbar: React.FC<NavbarProps> = ({
           </button>
 
           {isProfileDropdownOpen && (
-            <div className="absolute top-full right-0 mt-2 w-60 bg-[#1a1b1e] rounded-2xl border border-[#48454d]/40 p-2 shadow-2xl z-50 animate-in fade-in zoom-in-95 duration-100 space-y-2">
+            <div className="absolute top-full right-0 mt-2 w-72 bg-[#1a1b1e] rounded-2xl border border-[#48454d]/40 p-2 shadow-2xl z-50 animate-in fade-in zoom-in-95 duration-100 space-y-2">
               <div className="px-3 py-2 border-b border-[#48454d]/25">
                 <div className="text-[10px] font-mono text-[#938f98] uppercase tracking-wider">Signed in as</div>
                 <div className="text-xs font-mono font-medium text-white truncate">{userEmail || 'User Account'}</div>
+              </div>
+
+              {/* GitHub Connection Section */}
+              <div className="px-3 py-2 border-b border-[#48454d]/25">
+                <GitHubConnectionCard compact />
               </div>
 
               <div className="p-1">
@@ -259,6 +294,30 @@ export const Navbar: React.FC<NavbarProps> = ({
           )}
         </div>
       </div>
+
+      {/* GitHub Callback Toast Notification */}
+      {githubNotification && (
+        <div
+          className={`fixed top-16 right-6 z-50 max-w-sm p-3.5 rounded-2xl border shadow-2xl backdrop-blur-xl flex items-center justify-between gap-3 animate-in fade-in slide-in-from-top-4 duration-200 ${
+            githubNotification.type === 'success'
+              ? 'bg-[#0f241a]/95 border-emerald-500/40 text-emerald-200'
+              : 'bg-[#291215]/95 border-rose-500/40 text-rose-200'
+          }`}
+        >
+          <div className="flex items-center gap-2 text-xs font-mono">
+            <span className="material-symbols-outlined text-[18px]">
+              {githubNotification.type === 'success' ? 'check_circle' : 'error'}
+            </span>
+            <span>{githubNotification.message}</span>
+          </div>
+          <button
+            onClick={() => setGithubNotification(null)}
+            className="text-white/60 hover:text-white transition-colors cursor-pointer p-1"
+          >
+            <span className="material-symbols-outlined text-[14px]">close</span>
+          </button>
+        </div>
+      )}
     </header>
   );
 };

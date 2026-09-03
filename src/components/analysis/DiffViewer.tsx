@@ -1,8 +1,8 @@
 'use client';
-
-import React, { useState, useMemo, useEffect } from 'react';
-import { GeneratedChangeset, GeneratedFileChange, ValidationResult, ValidationStatus } from '@/types';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import { GeneratedChangeset, GeneratedFileChange, ValidationResult, ValidationStatus, GitHubConnectionStatus } from '@/types';
 import { computeLineDiff, calculateDiffStats, DiffLine } from '@/server/planner/diffUtils';
+import { createClient } from '@/lib/supabase/client';
 
 export interface DiffViewerProps {
   changeset: GeneratedChangeset;
@@ -37,6 +37,42 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   const [diffViewMode, setDiffViewMode] = useState<'unified' | 'split'>('unified');
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
+  const [githubConnection, setGithubConnection] = useState<GitHubConnectionStatus | null>(null);
+  const [isConnectingGitHub, setIsConnectingGitHub] = useState(false);
+
+  const supabase = createClient();
+
+  const loadGitHubConnection = useCallback(async () => {
+    try {
+      const res = await fetch('/api/github/connection');
+      if (res.ok) {
+        const data: GitHubConnectionStatus = await res.json();
+        setGithubConnection(data);
+      }
+    } catch {
+      // Passive fetch
+    }
+  }, []);
+
+  useEffect(() => {
+    loadGitHubConnection();
+  }, [loadGitHubConnection]);
+
+  const handleConnectGitHub = async () => {
+    setIsConnectingGitHub(true);
+    try {
+      const origin = typeof window !== 'undefined' ? window.location.origin : '';
+      await supabase.auth.signInWithOAuth({
+        provider: 'github',
+        options: {
+          redirectTo: `${origin}/auth/github/callback`,
+          scopes: 'repo',
+        },
+      });
+    } catch {
+      setIsConnectingGitHub(false);
+    }
+  };
 
   // Validation State
   const [isValidating, setIsValidating] = useState(false);
@@ -518,6 +554,57 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
           </button>
         </div>
       ) : null}
+
+      {/* GitHub Status & PR Readiness Indicator */}
+      <div className="p-3.5 rounded-2xl bg-[#13151b] border border-[#48454d]/30 text-xs font-mono flex items-center justify-between shadow-md animate-in fade-in">
+        <div className="flex items-center gap-3">
+          <div
+            className={`w-7 h-7 rounded-xl flex items-center justify-center shrink-0 ${
+              githubConnection?.connected
+                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+            }`}
+          >
+            <span className="material-symbols-outlined text-[17px]">
+              {githubConnection?.connected ? 'check_circle' : 'warning'}
+            </span>
+          </div>
+          <div>
+            <div className="font-bold text-white flex items-center gap-2">
+              <span>GitHub Status:</span>
+              {githubConnection?.connected ? (
+                <span className="text-emerald-300">
+                  Connected as @{githubConnection.githubLogin}
+                </span>
+              ) : (
+                <span className="text-amber-300">Account not connected</span>
+              )}
+            </div>
+            <div className="text-[11px] text-[#938f98]">
+              {githubConnection?.connected
+                ? 'Ready for Pull Request creation'
+                : 'Connect GitHub to create a Pull Request'}
+            </div>
+          </div>
+        </div>
+
+        <div>
+          {githubConnection?.connected ? (
+            <span className="px-2.5 py-1 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-[10px] font-bold uppercase tracking-wider">
+              Connected
+            </span>
+          ) : (
+            <button
+              onClick={handleConnectGitHub}
+              disabled={isConnectingGitHub}
+              className="px-3 py-1.5 rounded-xl bg-[#292a2d] hover:bg-[#38393e] border border-[#fbcfe8]/30 text-white text-[11px] font-mono font-medium flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
+            >
+              <span className="material-symbols-outlined text-[14px]">link</span>
+              <span>{isConnectingGitHub ? 'Connecting...' : 'Connect GitHub'}</span>
+            </button>
+          )}
+        </div>
+      </div>
 
       {/* Changeset Overview Stats */}
       <div className="flex items-center justify-between text-xs font-mono text-[#938f98] px-1">

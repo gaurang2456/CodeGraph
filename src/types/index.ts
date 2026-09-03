@@ -294,6 +294,10 @@ export interface ValidationResult {
   createdAt: string;
 }
 
-
-
-
+// Phase 4.0: GitHub Account Connection Types
+export interface GitHubConnectionStatus {
+  connected: boolean;
+  githubLogin?: string;
+  avatarUrl?: string;
+  connectedAt?: string;
+}

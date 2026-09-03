@@ -174,4 +174,19 @@ CREATE INDEX IF NOT EXISTS idx_validations_changeset_id ON changeset_validations
 CREATE INDEX IF NOT EXISTS idx_validations_repo_id ON changeset_validations(repository_id);
 CREATE INDEX IF NOT EXISTS idx_validations_user_id ON changeset_validations(user_id);
 
+-- GitHub Account Connections table (Phase 4.0 GitHub Integration)
+CREATE TABLE IF NOT EXISTS github_connections (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL UNIQUE,
+  github_user_id TEXT NOT NULL,
+  github_login TEXT NOT NULL,
+  access_token TEXT NOT NULL,
+  avatar_url TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_github_connections_user_id ON github_connections(user_id);
+
+
 
