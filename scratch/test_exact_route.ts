@@ -1,51 +1,34 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { ensureDatabaseSchema, query } from '@/server/db/client';
-import { FileTreeNode } from '@/types';
-import { requireRepositoryAccess, handleAuthApiError } from '@/server/auth/authHelper';
+import fs from 'fs';
+import path from 'path';
 
-export async function GET(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
-  try {
-    await ensureDatabaseSchema();
-    const { id } = await params;
-    const { repository } = await requireRepositoryAccess(id, req);
-
-    const { searchParams } = new URL(req.url);
-    const filePathParam = searchParams.get('path');
-    const withContent = searchParams.get('withContent') === 'true';
-
-    // 1. Single file content request
-    if (filePathParam) {
-      const fileRes = await query(
-        `SELECT id, file_path, file_name, extension, language, line_count, content
-         FROM repository_files
-         WHERE repository_id = $1 AND (file_path = $2 OR file_name = $2)
-         ORDER BY (file_path = $2) DESC
-         LIMIT 1`,
-        [id, filePathParam]
-      );
-
-      if (fileRes.rows.length === 0) {
-        return NextResponse.json({ error: 'File not found.' }, { status: 404 });
+// Load .env.local
+const envPath = path.resolve(process.cwd(), '.env.local');
+if (fs.existsSync(envPath)) {
+  const envContent = fs.readFileSync(envPath, 'utf8');
+  for (const line of envContent.split('\n')) {
+    const match = line.match(/^([^#=]+)=(.*)$/);
+    if (match) {
+      const key = match[1].trim();
+      const val = match[2].trim().replace(/^['"](.*)['"]$/, '$1');
+      if (!process.env[key]) {
+        process.env[key] = val;
       }
-
-      const row = fileRes.rows[0];
-      return NextResponse.json({
-        file: {
-          id: row.id,
-          filePath: row.file_path,
-          fileName: row.file_name,
-          extension: row.extension,
-          language: (row.language || 'code').toLowerCase(),
-          lineCount: row.line_count || 0,
-          code: row.content || '',
-        },
-      });
     }
+  }
+}
 
-    // 2. Full Tree Request: If withContent is false (default), do not query content column
+import { query } from '../src/server/db/client';
+import { FileTreeNode } from '../src/types';
+
+async function testExactRouteLogic() {
+  const id = 'repo-1788014671189';
+  const withContent = false;
+
+  console.log('Testing exact route logic for repo:', id);
+  try {
+    const repoRes = await query('SELECT * FROM repositories WHERE id = $1', [id]);
+    const repository = repoRes.rows[0];
+
     const selectCols = withContent
       ? `id, file_path, file_name, extension, language, line_count, content`
       : `id, file_path, file_name, extension, language, line_count`;
@@ -60,7 +43,6 @@ export async function GET(
 
     const repoName = repository.name || 'repository';
 
-    // Build hierarchical file tree from flat paths
     const rootNode: FileTreeNode = {
       id: 'root',
       name: repoName,
@@ -119,7 +101,6 @@ export async function GET(
       }
     }
 
-    // If withContent is false, optionally fetch just the very first file's content so first render has immediate snippet
     if (!withContent && filesRes.rows.length > 0) {
       const firstRow = filesRes.rows[0];
       const firstContentRes = await query(
@@ -144,12 +125,17 @@ export async function GET(
       }
     }
 
-    return NextResponse.json({
+    const payload = {
       fileTree: rootNode,
       snippets: snippetsMap,
       totalFiles: filesRes.rows.length,
-    });
-  } catch (error: any) {
-    return handleAuthApiError(error);
+    };
+
+    const serialized = JSON.stringify(payload);
+    console.log('SUCCESS! Serialized JSON length:', serialized.length);
+  } catch (err) {
+    console.error('FAILED with error:', err);
   }
 }
+
+testExactRouteLogic().catch(console.error);

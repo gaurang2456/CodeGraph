@@ -104,7 +104,6 @@ export const Navbar: React.FC<NavbarProps> = ({
     try {
       await supabase.auth.signOut();
       router.push('/login');
-      router.refresh();
     } catch (err) {
       console.error('Logout error:', err);
       router.push('/login');

@@ -18,6 +18,7 @@ import { SymbolDetailsPanel } from './SymbolDetailsPanel';
 import { GraphSearch } from './GraphSearch';
 import { GraphFilters } from './GraphFilters';
 import { GraphLegend } from './GraphLegend';
+import { useGraph } from '@/lib/api/queries';
 import {
   GraphApiResponse,
   GraphFilterState,
@@ -29,10 +30,20 @@ import {
   GraphApiNode,
 } from './graphUtils';
 
+export interface GraphPersistedUiState {
+  filterState?: GraphFilterState;
+  focusState?: GraphFocusState;
+  hierarchyState?: GraphHierarchyState;
+  selectedNodeId?: string | null;
+  layoutDirection?: 'TB' | 'LR';
+}
+
 export interface DependencyGraphViewProps {
   repo: Repository;
   onSelectFile?: (filename: string, startLine?: number, endLine?: number) => void;
   onAskAi?: (prompt: string) => void;
+  persistedUiState?: GraphPersistedUiState;
+  onPersistUiState?: (state: GraphPersistedUiState) => void;
 }
 
 const nodeTypes: any = {
@@ -59,18 +70,44 @@ const DEFAULT_HIERARCHY: GraphHierarchyState = {
   viewLevel: 'purpose',
 };
 
-function InnerCodeGraphView({ repo, onSelectFile, onAskAi }: DependencyGraphViewProps) {
+function InnerCodeGraphView({
+  repo,
+  onSelectFile,
+  onAskAi,
+  persistedUiState,
+  onPersistUiState,
+}: DependencyGraphViewProps) {
   const reactFlowInstance = useReactFlow();
 
-  const [apiData, setApiData] = useState<GraphApiResponse | null>(null);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string | null>(null);
+  const { data: apiData, isLoading, error: queryError, refetch } = useGraph(repo.id);
+  const error = queryError ? (queryError as Error).message : null;
 
-  const [filterState, setFilterState] = useState<GraphFilterState>(DEFAULT_FILTERS);
-  const [focusState, setFocusState] = useState<GraphFocusState>(DEFAULT_FOCUS);
-  const [hierarchyState, setHierarchyState] = useState<GraphHierarchyState>(DEFAULT_HIERARCHY);
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
-  const [layoutDirection, setLayoutDirection] = useState<'TB' | 'LR'>('TB');
+  const [filterState, setFilterState] = useState<GraphFilterState>(
+    persistedUiState?.filterState || DEFAULT_FILTERS
+  );
+  const [focusState, setFocusState] = useState<GraphFocusState>(
+    persistedUiState?.focusState || DEFAULT_FOCUS
+  );
+  const [hierarchyState, setHierarchyState] = useState<GraphHierarchyState>(
+    persistedUiState?.hierarchyState || DEFAULT_HIERARCHY
+  );
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(
+    persistedUiState?.selectedNodeId !== undefined ? persistedUiState.selectedNodeId : null
+  );
+  const [layoutDirection, setLayoutDirection] = useState<'TB' | 'LR'>(
+    persistedUiState?.layoutDirection || 'TB'
+  );
+
+  // Sync state to parent for lightweight persistence
+  useEffect(() => {
+    onPersistUiState?.({
+      filterState,
+      focusState,
+      hierarchyState,
+      selectedNodeId,
+      layoutDirection,
+    });
+  }, [filterState, focusState, hierarchyState, selectedNodeId, layoutDirection, onPersistUiState]);
 
   // History stack for back navigation to last opened state
   const [history, setHistory] = useState<
@@ -110,33 +147,6 @@ function InnerCodeGraphView({ repo, onSelectFile, onAskAi }: DependencyGraphView
       return nextHistory;
     });
   }, []);
-
-  // 1. Fetch real graph data from GET /api/repositories/[id]/graph
-  const fetchGraphData = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      const res = await fetch(`/api/repositories/${repo.id}/graph`);
-      if (!res.ok) {
-        if (res.status === 404) {
-          throw new Error('Repository not found.');
-        }
-        const errJson = await res.json().catch(() => ({}));
-        throw new Error(errJson.error || 'Failed to fetch repository graph.');
-      }
-      const data: GraphApiResponse = await res.json();
-      setApiData(data);
-    } catch (err: any) {
-      console.error('Error fetching graph data:', err);
-      setError(err?.message || 'Failed to load graph data.');
-    } finally {
-      setIsLoading(false);
-    }
-  }, [repo.id]);
-
-  useEffect(() => {
-    fetchGraphData();
-  }, [fetchGraphData]);
 
   // Toggle expanding a Purpose Node (Tier 1 -> Tier 2)
   const handleTogglePurposeExpand = useCallback((purposeId: string) => {
@@ -331,7 +341,7 @@ function InnerCodeGraphView({ repo, onSelectFile, onAskAi }: DependencyGraphView
             <p className="text-xs text-red-300/80 leading-relaxed font-mono">{error}</p>
           </div>
           <button
-            onClick={fetchGraphData}
+            onClick={() => refetch()}
             className="px-5 py-2.5 bg-[#292a2d] hover:bg-[#343538] border border-[#48454d]/30 text-xs font-mono text-[#e3e2e6] rounded-xl transition-colors cursor-pointer shadow-lg"
           >
             Retry Analysis

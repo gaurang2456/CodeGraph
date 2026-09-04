@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { Geist, Inter, JetBrains_Mono } from 'next/font/google';
+import { QueryProvider } from '@/components/providers/QueryProvider';
 import './globals.css';
 
 const geist = Geist({
@@ -40,7 +41,7 @@ export default function RootLayout({
         />
       </head>
       <body className="bg-[#121316] text-[#e3e2e6] font-sans antialiased min-h-screen selection:bg-[#fbcfe8]/20 selection:text-[#fbcfe8]">
-        {children}
+        <QueryProvider>{children}</QueryProvider>
       </body>
     </html>
   );

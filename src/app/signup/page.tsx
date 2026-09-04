@@ -57,7 +57,6 @@ export default function SignupPage() {
       if (data.session) {
         // Automatically signed in
         router.push('/');
-        router.refresh();
       } else if (data.user) {
         // Email confirmation required by Supabase project settings
         setSuccessMsg('Account created successfully! Please check your email inbox to confirm your account, then log in.');

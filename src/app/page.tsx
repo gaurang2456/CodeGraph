@@ -1,6 +1,16 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { useQueryClient } from '@tanstack/react-query';
+import {
+  useRepositories,
+  invalidateRepositories,
+  invalidateRepository,
+  invalidateGraph,
+  invalidateArchitecture,
+  invalidateRepositoryFiles,
+} from '@/lib/api/queries';
 import { Repository, TabType, ArchitectureFlowNode } from '@/types';
 
 import { Navbar } from '@/components/layout/Navbar';
@@ -15,13 +25,24 @@ import { UploadModal } from '@/components/upload/UploadModal';
 import { IndexingProgressModal } from '@/components/indexing/IndexingProgressModal';
 
 import { RepositorySummaryView } from '@/components/summary/RepositorySummaryView';
-import { DependencyGraphView } from '@/components/graph/DependencyGraphView';
-import { FileExplorerView } from '@/components/files/FileExplorerView';
-import { AnalysisView } from '@/components/analysis/AnalysisView';
+import { DependencyGraphView, GraphPersistedUiState } from '@/components/graph/DependencyGraphView';
+import { FileExplorerView, FilesPersistedUiState } from '@/components/files/FileExplorerView';
+import { AnalysisView, AnalysisPersistedUiState } from '@/components/analysis/AnalysisView';
 
 export default function Home() {
-  const [repositories, setRepositories] = useState<Repository[]>([]);
-  const [activeRepo, setActiveRepo] = useState<Repository | null>(null);
+  const router = useRouter();
+  const queryClient = useQueryClient();
+  const { data: repositories = [], isLoading: loadingRepos, error: repoError } = useRepositories();
+  const [activeRepoId, setActiveRepoId] = useState<string | null>(null);
+
+  const activeRepo =
+    (activeRepoId ? repositories.find((r) => r.id === activeRepoId) : null) ||
+    (repositories.length > 0 ? (repositories.find((r) => r.status === 'COMPLETED') || repositories[0]) : null);
+
+  const setActiveRepo = (repo: Repository | null) => {
+    setActiveRepoId(repo?.id || null);
+  };
+
   const [activeTab, setActiveTab] = useState<TabType>('summary');
   const [showLanding, setShowLanding] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -29,7 +50,9 @@ export default function Home() {
   const [selectedFile, setSelectedFile] = useState<string>('');
   const [targetLineRange, setTargetLineRange] = useState<{ startLine?: number; endLine?: number }>({});
   const [activeLayerFilter, setActiveLayerFilter] = useState<{ label: string; count: number; files: string[] } | null>(null);
-  const [loadingRepos, setLoadingRepos] = useState(true);
+  const [graphUiStateByRepo, setGraphUiStateByRepo] = useState<Record<string, GraphPersistedUiState>>({});
+  const [filesUiStateByRepo, setFilesUiStateByRepo] = useState<Record<string, FilesPersistedUiState>>({});
+  const [analysisUiStateByRepo, setAnalysisUiStateByRepo] = useState<Record<string, AnalysisPersistedUiState>>({});
 
   // Modals state
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
@@ -94,62 +117,11 @@ export default function Home() {
     }
   };
 
-  // Load repositories from real backend on mount
-  const fetchRepositories = async () => {
-    try {
-      const res = await fetch('/api/repositories');
-      if (res.status === 401) {
-        window.location.href = '/login';
-        return;
-      }
-      if (res.ok) {
-        const data = await res.json();
-        const repos: Repository[] = (data.repositories || []).map((r: any) => ({
-          id: r.id,
-          name: r.name,
-          fullName: r.full_name,
-          url: r.github_url,
-          primaryLanguage: r.primary_language || 'Code',
-          framework: r.framework || 'Standard',
-          fileCount: r.file_count || 0,
-          folderCount: r.folder_count || 0,
-          estimatedTokens: r.token_count || 0,
-          branch: r.branch || 'main',
-          status: r.status,
-          stage: r.stage,
-          progress: r.progress,
-          lastIndexedAt: new Date(r.updated_at || r.created_at).toLocaleDateString(),
-          stats: r.stats,
-          technologies: r.technologies || [],
-          summary: r.summary || {
-            projectType: 'Repository',
-            architecture: 'Modular',
-            backend: 'Standard',
-            frontend: 'N/A',
-            database: 'N/A',
-            authentication: 'Standard',
-            description: `Repository ${r.name}`,
-            keyPackages: [],
-          },
-          errorMessage: r.error_message,
-        }));
-
-        setRepositories(repos);
-        if (repos.length > 0 && !activeRepo) {
-          const completedRepo = repos.find((r) => r.status === 'COMPLETED') || repos[0];
-          setActiveRepo(completedRepo);
-        }
-      }
-    } catch (err) {
-      console.error('Failed to load repositories from API:', err);
-    } finally {
-      setLoadingRepos(false);
-    }
-  };
-
   useEffect(() => {
-    fetchRepositories();
-  }, []);
+    if (repoError && (repoError as Error).message === 'UNAUTHORIZED') {
+      router.push('/login');
+    }
+  }, [repoError, router]);
 
   // Poll backend for indexing progress
   useEffect(() => {
@@ -169,7 +141,13 @@ export default function Home() {
 
             if (repo.status === 'COMPLETED' || repo.status === 'FAILED') {
               clearInterval(interval);
-              fetchRepositories();
+              invalidateRepositories(queryClient);
+              if (repo.id) {
+                invalidateRepository(queryClient, repo.id);
+                invalidateGraph(queryClient, repo.id);
+                invalidateArchitecture(queryClient, repo.id);
+                invalidateRepositoryFiles(queryClient, repo.id);
+              }
             }
           }
         }
@@ -179,7 +157,7 @@ export default function Home() {
     }, 1500);
 
     return () => clearInterval(interval);
-  }, [indexingRepoId, isIndexingModalOpen]);
+  }, [indexingRepoId, isIndexingModalOpen, queryClient]);
 
   // Handle Real ZIP Upload
   const handleUploadZip = async (file: File) => {
@@ -207,6 +185,7 @@ export default function Home() {
 
       const data = await res.json();
       setIndexingRepoId(data.id);
+      invalidateRepositories(queryClient);
     } catch (err: any) {
       setIndexingStatus('FAILED');
       setIndexingError(err?.message || 'Failed to upload repository ZIP.');
@@ -236,6 +215,7 @@ export default function Home() {
 
       const data = await res.json();
       setIndexingRepoId(data.id);
+      invalidateRepositories(queryClient);
     } catch (err: any) {
       setIndexingStatus('FAILED');
       setIndexingError(err?.message || 'Failed to import GitHub repository.');
@@ -244,10 +224,7 @@ export default function Home() {
 
   const handleFinishIndexing = () => {
     if (indexingRepoId) {
-      const found = repositories.find((r) => r.id === indexingRepoId);
-      if (found) {
-        setActiveRepo(found);
-      }
+      setActiveRepoId(indexingRepoId);
     }
     setIsIndexingModalOpen(false);
     setShowLanding(false);
@@ -384,6 +361,12 @@ export default function Home() {
               {activeTab === 'graph' && (
                 <DependencyGraphView
                   repo={activeRepo}
+                  persistedUiState={activeRepo?.id ? graphUiStateByRepo[activeRepo.id] : undefined}
+                  onPersistUiState={(state) => {
+                    if (activeRepo?.id) {
+                      setGraphUiStateByRepo((prev) => ({ ...prev, [activeRepo.id]: state }));
+                    }
+                  }}
                   onSelectFile={handleSelectFileFromAnywhere}
                   onAskAi={handleAskAiFromAnywhere}
                 />
@@ -398,12 +381,24 @@ export default function Home() {
                   onClearFilter={() => setActiveLayerFilter(null)}
                   onFileSelect={handleSelectFileFromAnywhere}
                   onAskAi={handleAskAiFromAnywhere}
+                  persistedUiState={activeRepo?.id ? filesUiStateByRepo[activeRepo.id] : undefined}
+                  onPersistUiState={(state) => {
+                    if (activeRepo?.id) {
+                      setFilesUiStateByRepo((prev) => ({ ...prev, [activeRepo.id]: state }));
+                    }
+                  }}
                 />
               )}
 
               {activeTab === 'analysis' && (
                 <AnalysisView
                   repo={activeRepo}
+                  persistedUiState={activeRepo?.id ? analysisUiStateByRepo[activeRepo.id] : undefined}
+                  onPersistUiState={(state) => {
+                    if (activeRepo?.id) {
+                      setAnalysisUiStateByRepo((prev) => ({ ...prev, [activeRepo.id]: state }));
+                    }
+                  }}
                   onSelectFile={handleSelectFileFromAnywhere}
                   onAskAi={handleAskAiFromAnywhere}
                 />

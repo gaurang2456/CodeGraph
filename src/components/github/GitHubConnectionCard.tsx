@@ -1,8 +1,10 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { createClient } from '@/lib/supabase/client';
 import { GitHubConnectionStatus } from '@/types';
+import { useGitHubConnection, invalidateGitHubConnection } from '@/lib/api/queries';
 
 export interface GitHubConnectionCardProps {
   initialStatus?: GitHubConnectionStatus | null;
@@ -15,34 +17,21 @@ export const GitHubConnectionCard: React.FC<GitHubConnectionCardProps> = ({
   onConnectionChange,
   compact = false,
 }) => {
-  const [status, setStatus] = useState<GitHubConnectionStatus | null>(initialStatus || null);
+  const queryClient = useQueryClient();
+  const { data: queryStatus, isLoading: isQueryLoading } = useGitHubConnection();
+  const status: GitHubConnectionStatus | null = queryStatus ?? initialStatus ?? null;
+  const fetching = isQueryLoading && !initialStatus && queryStatus === undefined;
+
   const [loading, setLoading] = useState(false);
-  const [fetching, setFetching] = useState(!initialStatus);
   const [error, setError] = useState<string | null>(null);
 
   const supabase = createClient();
 
-  const fetchConnection = useCallback(async () => {
-    try {
-      setFetching(true);
-      const res = await fetch('/api/github/connection');
-      if (res.ok) {
-        const data: GitHubConnectionStatus = await res.json();
-        setStatus(data);
-        onConnectionChange?.(data);
-      }
-    } catch {
-      // Ignore network errors on passive fetch
-    } finally {
-      setFetching(false);
-    }
-  }, [onConnectionChange]);
-
   useEffect(() => {
-    if (!initialStatus) {
-      fetchConnection();
+    if (queryStatus) {
+      onConnectionChange?.(queryStatus);
     }
-  }, [initialStatus, fetchConnection]);
+  }, [queryStatus, onConnectionChange]);
 
   const handleConnect = async () => {
     setLoading(true);
@@ -81,7 +70,8 @@ export const GitHubConnectionCard: React.FC<GitHubConnectionCardProps> = ({
 
       if (res.ok) {
         const newStatus: GitHubConnectionStatus = { connected: false };
-        setStatus(newStatus);
+        queryClient.setQueryData(['github-connection'], newStatus);
+        await invalidateGitHubConnection(queryClient);
         onConnectionChange?.(newStatus);
       } else {
         setError('Failed to disconnect GitHub account. Please try again.');

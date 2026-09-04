@@ -1,5 +1,6 @@
 'use client';
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   GeneratedChangeset,
   GeneratedFileChange,
@@ -11,6 +12,17 @@ import {
 } from '@/types';
 import { computeLineDiff, calculateDiffStats, DiffLine } from '@/server/planner/diffUtils';
 import { createClient } from '@/lib/supabase/client';
+import {
+  useGitHubConnection,
+  useChangesetBranch,
+  useChangesetPR,
+  useChangesetValidation,
+  invalidateChangesetBranch,
+  invalidateChangesetPR,
+  invalidateValidation,
+  GITHUB_KEYS,
+  VALIDATION_KEYS,
+} from '@/lib/api/queries';
 
 export interface DiffViewerProps {
   changeset: GeneratedChangeset;
@@ -45,65 +57,33 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   const [diffViewMode, setDiffViewMode] = useState<'unified' | 'split'>('unified');
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
-  const [githubConnection, setGithubConnection] = useState<GitHubConnectionStatus | null>(null);
+  const queryClient = useQueryClient();
+
+  // Shared GitHub connection status
+  const { data: githubData } = useGitHubConnection();
+  const githubConnection = githubData || null;
+
+  // Cached branch for this changeset
+  const { data: branchData } = useChangesetBranch(changeset.id);
+  const changesetBranch = branchData?.branch || null;
+
+  // Cached PR for this changeset
+  const { data: prData } = useChangesetPR(changeset.id);
+  const pullRequest = prData?.pullRequest || null;
+
+  // Cached validation result for this changeset
+  const { data: valData } = useChangesetValidation(changeset.id);
+  const validationResult = valData?.validation || null;
+
   const [isConnectingGitHub, setIsConnectingGitHub] = useState(false);
-  const [changesetBranch, setChangesetBranch] = useState<ChangesetBranch | null>(null);
   const [isCreatingBranch, setIsCreatingBranch] = useState(false);
   const [branchError, setBranchError] = useState<string | null>(null);
   const [isCommitting, setIsCommitting] = useState(false);
   const [commitError, setCommitError] = useState<string | null>(null);
-  const [pullRequest, setPullRequest] = useState<PullRequestRecord | null>(null);
   const [isCreatingPr, setIsCreatingPr] = useState(false);
   const [prError, setPrError] = useState<string | null>(null);
 
   const supabase = createClient();
-
-  const loadGitHubConnection = useCallback(async () => {
-    try {
-      const res = await fetch('/api/github/connection');
-      if (res.ok) {
-        const data: GitHubConnectionStatus = await res.json();
-        setGithubConnection(data);
-      }
-    } catch {
-      // Passive fetch
-    }
-  }, []);
-
-  const loadBranch = useCallback(async (csId: string) => {
-    try {
-      const res = await fetch(`/api/changesets/${csId}/github/branch`);
-      if (res.ok) {
-        const data = await res.json();
-        setChangesetBranch(data.branch || null);
-      }
-    } catch {
-      // Passive fetch
-    }
-  }, []);
-
-  const loadPullRequest = useCallback(async (csId: string) => {
-    try {
-      const res = await fetch(`/api/changesets/${csId}/github/pr`);
-      if (res.ok) {
-        const data = await res.json();
-        setPullRequest(data.pullRequest || null);
-      }
-    } catch {
-      // Passive fetch
-    }
-  }, []);
-
-  useEffect(() => {
-    loadGitHubConnection();
-  }, [loadGitHubConnection]);
-
-  useEffect(() => {
-    if (changeset.id) {
-      loadBranch(changeset.id);
-      loadPullRequest(changeset.id);
-    }
-  }, [changeset.id, loadBranch, loadPullRequest]);
 
   const handleCreatePullRequest = async () => {
     setIsCreatingPr(true);
@@ -114,7 +94,8 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
       });
       const data = await res.json();
       if (res.ok && data.pullRequest) {
-        setPullRequest(data.pullRequest);
+        queryClient.setQueryData(GITHUB_KEYS.pr(changeset.id), { pullRequest: data.pullRequest });
+        invalidateChangesetPR(queryClient, changeset.id);
       } else {
         setPrError(data.error || 'Failed to create Pull Request.');
       }
@@ -134,7 +115,8 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
       });
       const data = await res.json();
       if (res.ok && data.branch) {
-        setChangesetBranch(data.branch);
+        queryClient.setQueryData(GITHUB_KEYS.branch(changeset.id), { branch: data.branch });
+        invalidateChangesetBranch(queryClient, changeset.id);
       } else {
         setBranchError(data.error || 'Failed to create GitHub branch.');
       }
@@ -154,7 +136,8 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
       });
       const data = await res.json();
       if (res.ok && data.branch) {
-        setChangesetBranch(data.branch);
+        queryClient.setQueryData(GITHUB_KEYS.branch(changeset.id), { branch: data.branch });
+        invalidateChangesetBranch(queryClient, changeset.id);
       } else {
         setCommitError(data.error || 'Failed to commit and push changes.');
       }
@@ -184,34 +167,10 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   // Validation State
   const [isValidating, setIsValidating] = useState(false);
   const [valProgressIdx, setValProgressIdx] = useState(0);
-  const [validationResult, setValidationResult] = useState<ValidationResult | null>(null);
   const [expandedLogChecks, setExpandedLogChecks] = useState<Record<string, boolean>>({});
 
   const currentFile: GeneratedFileChange | undefined =
     changeset.changes[selectedFileIdx] || changeset.changes[0];
-
-  // Load existing validation for this changeset
-  const loadValidation = async (csId: string) => {
-    try {
-      const res = await fetch(`/api/changesets/${csId}/validation`);
-      if (res.ok) {
-        const data = await res.json();
-        if (data.validation) {
-          setValidationResult(data.validation);
-        } else {
-          setValidationResult(null);
-        }
-      }
-    } catch (err) {
-      console.warn('Could not load validation for changeset:', err);
-    }
-  };
-
-  useEffect(() => {
-    if (changeset.id) {
-      loadValidation(changeset.id);
-    }
-  }, [changeset.id]);
 
   // Validation progress animation
   useEffect(() => {
@@ -232,8 +191,9 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
       if (res.ok) {
         const data = await res.json();
         if (data.validation) {
-          setValidationResult(data.validation);
+          queryClient.setQueryData(VALIDATION_KEYS.detail(changeset.id), { validation: data.validation });
         }
+        invalidateValidation(queryClient, changeset.id);
       }
     } catch (err) {
       console.error('Validation error:', err);

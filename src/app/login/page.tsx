@@ -44,7 +44,6 @@ export default function LoginPage() {
 
       if (data.user) {
         router.push('/');
-        router.refresh();
       }
     } catch (err: any) {
       console.error('Login error:', err);

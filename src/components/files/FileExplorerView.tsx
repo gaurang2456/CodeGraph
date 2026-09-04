@@ -2,6 +2,13 @@
 
 import React, { useState, useEffect } from 'react';
 import { Repository, FileTreeNode } from '@/types';
+import { useRepositoryFiles, useFileContent } from '@/lib/api/queries';
+
+export interface FilesPersistedUiState {
+  openTabs?: string[];
+  activeTab?: string;
+  expandedFolders?: Record<string, boolean>;
+}
 
 export interface FileExplorerViewProps {
   repo: Repository;
@@ -11,6 +18,8 @@ export interface FileExplorerViewProps {
   onClearFilter?: () => void;
   onFileSelect?: (filename: string, startLine?: number, endLine?: number) => void;
   onAskAi?: (prompt: string) => void;
+  persistedUiState?: FilesPersistedUiState;
+  onPersistUiState?: (state: FilesPersistedUiState) => void;
 }
 
 export const FileExplorerView: React.FC<FileExplorerViewProps> = ({
@@ -20,98 +29,140 @@ export const FileExplorerView: React.FC<FileExplorerViewProps> = ({
   activeLayerFilter,
   onClearFilter,
   onFileSelect,
-  onAskAi
+  onAskAi,
+  persistedUiState,
+  onPersistUiState,
 }) => {
-  const [fileTree, setFileTree] = useState<FileTreeNode | null>(null);
+  const {
+    data: filesData,
+    isLoading: loadingFiles,
+    isFetching: fetchingFiles,
+    isError: isFilesError,
+    error: filesError,
+    refetch: refetchFiles,
+  } = useRepositoryFiles(repo.id);
+  const fileTree = filesData?.fileTree || null;
+
+  const [openTabs, setOpenTabs] = useState<string[]>(persistedUiState?.openTabs || []);
+  const [activeTab, setActiveTab] = useState<string>(persistedUiState?.activeTab || '');
+  const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>(
+    persistedUiState?.expandedFolders || { root: true }
+  );
   const [snippets, setSnippets] = useState<Record<string, { code: string; language: string; lineCount: number }>>({});
-  const [loading, setLoading] = useState(true);
-  const [openTabs, setOpenTabs] = useState<string[]>([]);
-  const [activeTab, setActiveTab] = useState<string>('');
   const [copied, setCopied] = useState(false);
-  const [expandedFolders, setExpandedFolders] = useState<Record<string, boolean>>({
-    'root': true,
-  });
 
-  // Fetch real files from API
+  // Lazy-load active file content on-demand
+  const targetPath = activeTab || externalSelectedFile || null;
+  const { data: activeFileContentData, isLoading: loadingFileContent } = useFileContent(
+    repo.id,
+    targetPath
+  );
+
+  // Merge loaded file content into local snippets map
   useEffect(() => {
-    let isMounted = true;
-    async function loadFiles() {
-      setLoading(true);
-      try {
-        const res = await fetch(`/api/repositories/${repo.id}/files`);
-        if (res.ok) {
-          const data = await res.json();
-          if (isMounted && data.fileTree) {
-            setFileTree(data.fileTree);
-            setSnippets(data.snippets || {});
+    if (activeFileContentData?.file) {
+      const f = activeFileContentData.file;
+      setSnippets((prev) => ({
+        ...prev,
+        [f.fileName]: { code: f.code, language: f.language, lineCount: f.lineCount },
+        [f.filePath]: { code: f.code, language: f.language, lineCount: f.lineCount },
+      }));
+    }
+  }, [activeFileContentData]);
 
-            // Auto-expand all folders if a layer filter is active
-            if (activeLayerFilter && activeLayerFilter.files.length > 0) {
-              const newExpanded: Record<string, boolean> = { root: true };
-              const expandNodes = (node: FileTreeNode) => {
-                if (node.type === 'folder') {
-                  newExpanded[node.id] = true;
-                  if (node.children) node.children.forEach(expandNodes);
-                }
-              };
-              expandNodes(data.fileTree);
-              setExpandedFolders(newExpanded);
-            }
+  // Merge initial snippets from tree load if any
+  useEffect(() => {
+    if (filesData?.snippets && Object.keys(filesData.snippets).length > 0) {
+      setSnippets((prev) => ({
+        ...filesData.snippets,
+        ...prev,
+      }));
+    }
+  }, [filesData?.snippets]);
 
-            // Set initial tab based on external selection or first file
-            const snippetKeys = Object.keys(data.snippets || {});
-            const firstFile = snippetKeys.find((k) => !k.includes('/')) || snippetKeys[0];
+  // Sync state back to parent
+  useEffect(() => {
+    onPersistUiState?.({
+      openTabs,
+      activeTab,
+      expandedFolders,
+    });
+  }, [openTabs, activeTab, expandedFolders, onPersistUiState]);
 
-            if (externalSelectedFile && data.snippets?.[externalSelectedFile]) {
-              setOpenTabs([externalSelectedFile]);
-              setActiveTab(externalSelectedFile);
-            } else if (firstFile) {
-              setOpenTabs([firstFile]);
-              setActiveTab(firstFile);
+  // Initial tab selection if none open
+  useEffect(() => {
+    if (filesData?.fileTree && openTabs.length === 0 && !activeTab) {
+      if (externalSelectedFile) {
+        setOpenTabs([externalSelectedFile]);
+        setActiveTab(externalSelectedFile);
+      } else {
+        const findFirstFile = (node: FileTreeNode): string | null => {
+          if (node.type === 'file') return node.path || node.name;
+          if (node.children) {
+            for (const c of node.children) {
+              const found = findFirstFile(c);
+              if (found) return found;
             }
           }
+          return null;
+        };
+        const first = findFirstFile(filesData.fileTree);
+        if (first) {
+          setOpenTabs([first]);
+          setActiveTab(first);
         }
-      } catch (err) {
-        console.error('Failed to load repository files:', err);
-      } finally {
-        if (isMounted) setLoading(false);
       }
     }
+  }, [filesData?.fileTree, openTabs.length, activeTab, externalSelectedFile]);
 
-    loadFiles();
-    return () => {
-      isMounted = false;
-    };
-  }, [repo.id, activeLayerFilter]);
+  // Targeted auto-expansion of folder ancestors for active layer filter
+  useEffect(() => {
+    if (activeLayerFilter && activeLayerFilter.files.length > 0) {
+      const newExpanded: Record<string, boolean> = { root: true };
+      for (const filePath of activeLayerFilter.files) {
+        const parts = filePath.split('/');
+        for (let i = 1; i < parts.length; i++) {
+          const folderPath = parts.slice(0, i).join('/');
+          newExpanded[folderPath] = true;
+        }
+      }
+      setExpandedFolders((prev) => ({ ...prev, ...newExpanded }));
+    }
+  }, [activeLayerFilter]);
 
-  // Sync external file selection
+  // Sync external file selection without creating duplicate tabs
   useEffect(() => {
     if (externalSelectedFile) {
-      const cleanName = externalSelectedFile.split('/').pop() || externalSelectedFile;
-      if (!openTabs.includes(cleanName) && !openTabs.includes(externalSelectedFile)) {
-        setOpenTabs((prev) => [...prev, cleanName]);
-      }
-      setActiveTab(cleanName);
+      setOpenTabs((prev) => {
+        if (prev.includes(externalSelectedFile)) return prev;
+        const cleanName = externalSelectedFile.split('/').pop() || externalSelectedFile;
+        const filtered = prev.filter((p) => p !== cleanName);
+        return [...filtered, externalSelectedFile];
+      });
+      setActiveTab(externalSelectedFile);
     }
   }, [externalSelectedFile]);
 
   const handleSelectFile = (node: FileTreeNode) => {
-    const filename = node.name;
-    if (!openTabs.includes(filename)) {
-      setOpenTabs((prev) => [...prev, filename]);
-    }
-    setActiveTab(filename);
+    const fullPath = node.path || node.name;
+    setOpenTabs((prev) => {
+      if (prev.includes(fullPath)) return prev;
+      return [...prev, fullPath];
+    });
+    setActiveTab(fullPath);
     if (onFileSelect) {
-      onFileSelect(node.path || filename);
+      onFileSelect(fullPath);
     }
   };
 
-  const handleCloseTab = (filename: string, e: React.MouseEvent) => {
+  const handleCloseTab = (tabPath: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    const newTabs = openTabs.filter((t) => t !== filename);
+    const newTabs = openTabs.filter((t) => t !== tabPath);
     setOpenTabs(newTabs);
-    if (activeTab === filename && newTabs.length > 0) {
+    if (activeTab === tabPath && newTabs.length > 0) {
       setActiveTab(newTabs[0]);
+    } else if (newTabs.length === 0) {
+      setActiveTab('');
     }
   };
 
@@ -119,10 +170,14 @@ export const FileExplorerView: React.FC<FileExplorerViewProps> = ({
     setExpandedFolders((prev) => ({ ...prev, [folderId]: !prev[folderId] }));
   };
 
+  const loading = (loadingFiles || fetchingFiles) && !fileTree;
+
   const activeSnippet = snippets[activeTab] ||
     snippets[externalSelectedFile || ''] || {
       language: 'text',
-      code: `// File: ${activeTab}\n// Select a file from the explorer on the left to view its contents.`,
+      code: loadingFileContent
+        ? `// Loading ${activeTab || 'file'}...\n`
+        : `// File: ${activeTab || 'No file selected'}\n// Select a file from the explorer on the left to view its contents.`,
       lineCount: 2,
     };
 
@@ -135,7 +190,12 @@ export const FileExplorerView: React.FC<FileExplorerViewProps> = ({
   // Helper to check if file or node belongs to active layer filter
   const isFileInActiveFilter = (filePathOrName: string) => {
     if (!activeLayerFilter || !activeLayerFilter.files || activeLayerFilter.files.length === 0) return true;
-    return activeLayerFilter.files.some((f) => f === filePathOrName || f.endsWith('/' + filePathOrName) || filePathOrName.endsWith('/' + f));
+    return activeLayerFilter.files.some(
+      (f) =>
+        f === filePathOrName ||
+        f.endsWith('/' + filePathOrName) ||
+        filePathOrName.endsWith('/' + f)
+    );
   };
 
   // Recursive Tree Rendering
@@ -246,12 +306,26 @@ export const FileExplorerView: React.FC<FileExplorerViewProps> = ({
 
         {/* Tree List */}
         <div className="flex-1 overflow-y-auto p-1.5">
-          {loading ? (
+          {isFilesError ? (
+            <div className="p-4 text-xs text-rose-300 font-mono flex flex-col gap-2">
+              <div className="flex items-center gap-1.5 text-rose-400">
+                <span className="material-symbols-outlined text-[16px]">error</span>
+                <span>Failed to load files</span>
+              </div>
+              <p className="text-[11px] text-[#938f98]">{filesError?.message || 'Unknown network or query error'}</p>
+              <button
+                onClick={() => refetchFiles()}
+                className="px-2.5 py-1 bg-[#292a2d] hover:bg-[#343538] rounded text-xs text-[#e3e2e6] border border-[#48454d]/30 w-fit cursor-pointer transition-colors"
+              >
+                Retry
+              </button>
+            </div>
+          ) : loading ? (
             <div className="p-4 text-xs text-[#938f98] flex items-center gap-2 font-mono">
               <span className="material-symbols-outlined text-[16px] animate-spin">progress_activity</span>
               Loading files...
             </div>
-          ) : fileTree ? (
+          ) : fileTree && fileTree.children && fileTree.children.length > 0 ? (
             renderTree(fileTree)
           ) : (
             <div className="p-4 text-xs text-[#938f98] font-mono">No files found.</div>
@@ -263,12 +337,14 @@ export const FileExplorerView: React.FC<FileExplorerViewProps> = ({
       <div className="flex-1 flex flex-col bg-[#111316] min-w-0 overflow-hidden">
         {/* Editor Tabs */}
         <div className="flex items-center bg-[#0c0e11] border-b border-[#48454d]/20 overflow-x-auto no-scrollbar">
-          {openTabs.map((tab, index) => {
-            const isActive = activeTab === tab;
+          {openTabs.map((tabPath) => {
+            const isActive = activeTab === tabPath;
+            const tabName = tabPath.split('/').pop() || tabPath;
             return (
               <div
-                key={`${tab}-${index}`}
-                onClick={() => setActiveTab(tab)}
+                key={tabPath}
+                onClick={() => setActiveTab(tabPath)}
+                title={tabPath}
                 className={`flex items-center gap-1.5 px-3.5 py-2 min-w-fit cursor-pointer border-b-2 text-xs transition-colors group ${
                   isActive
                     ? 'bg-[#111316] border-[#fbcfe8] text-[#e3e2e6] font-medium'
@@ -280,12 +356,13 @@ export const FileExplorerView: React.FC<FileExplorerViewProps> = ({
                     isActive ? 'text-[#b7c8e1]' : 'text-[#938f98]'
                   }`}
                 >
-                  {tab.endsWith('.yml') || tab.endsWith('.xml') || tab.endsWith('.json') ? 'description' : 'code'}
+                  {tabPath.endsWith('.yml') || tabPath.endsWith('.xml') || tabPath.endsWith('.json') ? 'description' : 'code'}
                 </span>
-                <span>{tab}</span>
+                <span>{tabName}</span>
                 <button
-                  onClick={(e) => handleCloseTab(tab, e)}
+                  onClick={(e) => handleCloseTab(tabPath, e)}
                   className="p-0.5 hover:bg-[#292a2d] rounded ml-1 opacity-60 hover:opacity-100 transition-opacity"
+                  title="Close tab"
                 >
                   <span className="material-symbols-outlined text-[12px]">close</span>
                 </button>

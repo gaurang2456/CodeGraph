@@ -2,12 +2,26 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { Repository, FeaturePlanRecord, FeaturePlanData, GeneratedChangeset } from '@/types';
+import { useQueryClient } from '@tanstack/react-query';
+import {
+  useFeaturePlans,
+  useChangesets,
+  invalidateFeaturePlans,
+  invalidateChangesets,
+} from '@/lib/api/queries';
 import { DiffViewer } from './DiffViewer';
+
+export interface AnalysisPersistedUiState {
+  selectedPlanId?: string | null;
+  selectedChangesetId?: string | null;
+}
 
 export interface AnalysisViewProps {
   repo: Repository;
   onSelectFile?: (filename: string, startLine?: number, endLine?: number) => void;
   onAskAi?: (prompt: string) => void;
+  persistedUiState?: AnalysisPersistedUiState;
+  onPersistUiState?: (state: AnalysisPersistedUiState) => void;
 }
 
 const SAMPLE_SUGGESTIONS = [
@@ -35,66 +49,56 @@ const CODE_GEN_STAGES = [
   'Preparing Git-style diff preview...',
 ];
 
-export const AnalysisView: React.FC<AnalysisViewProps> = ({ repo, onSelectFile, onAskAi }) => {
+export const AnalysisView: React.FC<AnalysisViewProps> = ({
+  repo,
+  onSelectFile,
+  onAskAi,
+  persistedUiState,
+  onPersistUiState,
+}) => {
+  const queryClient = useQueryClient();
   const [featurePrompt, setFeaturePrompt] = useState('');
   const [isGeneratingPlan, setIsGeneratingPlan] = useState(false);
   const [isGeneratingCode, setIsGeneratingCode] = useState(false);
   const [loadingStageIdx, setLoadingStageIdx] = useState(0);
   const [codeGenStageIdx, setCodeGenStageIdx] = useState(0);
-  const [currentPlan, setCurrentPlan] = useState<FeaturePlanRecord | null>(null);
-  const [previousPlans, setPreviousPlans] = useState<FeaturePlanRecord[]>([]);
-  const [currentChangeset, setCurrentChangeset] = useState<GeneratedChangeset | null>(null);
-  const [allChangesets, setAllChangesets] = useState<GeneratedChangeset[]>([]);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const planContainerRef = useRef<HTMLDivElement>(null);
   const diffContainerRef = useRef<HTMLDivElement>(null);
 
-  // Load previous feature plans for this repository
-  const loadPreviousPlans = async () => {
-    try {
-      const res = await fetch(`/api/repositories/${repo.id}/feature-plans`);
-      if (res.ok) {
-        const data = await res.json();
-        if (data.plans && data.plans.length > 0) {
-          setPreviousPlans(data.plans);
-          if (!currentPlan) {
-            setCurrentPlan(data.plans[0]);
-          }
-        }
-      }
-    } catch (err) {
-      console.warn('Could not fetch previous plans:', err);
-    }
-  };
+  // Load feature plans from TanStack Query cache
+  const { data: plansData } = useFeaturePlans(repo.id);
+  const previousPlans = plansData?.plans || [];
 
-  // Load changesets for the selected feature plan
-  const loadChangesetsForPlan = async (planId: string) => {
-    try {
-      const res = await fetch(`/api/feature-plans/${planId}/changesets`);
-      if (res.ok) {
-        const data = await res.json();
-        if (data.changesets && data.changesets.length > 0) {
-          setAllChangesets(data.changesets);
-          setCurrentChangeset(data.changesets[0]);
-        } else {
-          setAllChangesets([]);
-          setCurrentChangeset(null);
-        }
-      }
-    } catch (err) {
-      console.warn('Could not fetch changesets for plan:', err);
-    }
-  };
+  const [selectedPlanId, setSelectedPlanId] = useState<string | null>(
+    persistedUiState?.selectedPlanId || null
+  );
 
+  const currentPlan =
+    (selectedPlanId ? previousPlans.find((p) => p.id === selectedPlanId) : null) ||
+    previousPlans[0] ||
+    null;
+
+  // Load changesets for current plan from TanStack Query cache
+  const { data: changesetsData } = useChangesets(currentPlan?.id);
+  const allChangesets = changesetsData?.changesets || [];
+
+  const [selectedChangesetId, setSelectedChangesetId] = useState<string | null>(
+    persistedUiState?.selectedChangesetId || null
+  );
+
+  const currentChangeset =
+    (selectedChangesetId ? allChangesets.find((c) => c.id === selectedChangesetId) : null) ||
+    allChangesets[0] ||
+    null;
+
+  // Persist lightweight UI state to parent
   useEffect(() => {
-    loadPreviousPlans();
-  }, [repo.id]);
-
-  useEffect(() => {
-    if (currentPlan?.id) {
-      loadChangesetsForPlan(currentPlan.id);
-    }
-  }, [currentPlan?.id]);
+    onPersistUiState?.({
+      selectedPlanId: currentPlan?.id || null,
+      selectedChangesetId: currentChangeset?.id || null,
+    });
+  }, [currentPlan?.id, currentChangeset?.id, onPersistUiState]);
 
   // Plan loading animation cycle
   useEffect(() => {
@@ -124,8 +128,7 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({ repo, onSelectFile, 
     setIsGeneratingPlan(true);
     setErrorMsg(null);
     setLoadingStageIdx(0);
-    setCurrentChangeset(null);
-    setAllChangesets([]);
+    setSelectedChangesetId(null);
 
     try {
       const res = await fetch(`/api/repositories/${repo.id}/feature-plan`, {
@@ -141,8 +144,8 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({ repo, onSelectFile, 
 
       const data = await res.json();
       if (data.plan) {
-        setCurrentPlan(data.plan);
-        setPreviousPlans((prev) => [data.plan, ...prev.filter((p) => p.id !== data.plan.id)]);
+        setSelectedPlanId(data.plan.id);
+        invalidateFeaturePlans(queryClient, repo.id);
         setFeaturePrompt('');
         setTimeout(() => {
           planContainerRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -174,8 +177,8 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({ repo, onSelectFile, 
 
       const data = await res.json();
       if (data.changeset) {
-        setCurrentChangeset(data.changeset);
-        setAllChangesets((prev) => [data.changeset, ...prev.filter((c) => c.id !== data.changeset.id)]);
+        setSelectedChangesetId(data.changeset.id);
+        invalidateChangesets(queryClient, currentPlan.id);
         setTimeout(() => {
           diffContainerRef.current?.scrollIntoView({ behavior: 'smooth' });
         }, 150);
@@ -196,14 +199,8 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({ repo, onSelectFile, 
         body: JSON.stringify({ status: 'approved' }),
       });
 
-      if (res.ok) {
-        const data = await res.json();
-        if (data.changeset) {
-          setCurrentChangeset(data.changeset);
-          setAllChangesets((prev) =>
-            prev.map((c) => (c.id === data.changeset.id ? data.changeset : c))
-          );
-        }
+      if (res.ok && currentPlan) {
+        invalidateChangesets(queryClient, currentPlan.id);
       }
     } catch (err) {
       console.error('Error approving changeset:', err);
@@ -218,14 +215,8 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({ repo, onSelectFile, 
         body: JSON.stringify({ status: 'rejected' }),
       });
 
-      if (res.ok) {
-        const data = await res.json();
-        if (data.changeset) {
-          setCurrentChangeset(data.changeset);
-          setAllChangesets((prev) =>
-            prev.map((c) => (c.id === data.changeset.id ? data.changeset : c))
-          );
-        }
+      if (res.ok && currentPlan) {
+        invalidateChangesets(queryClient, currentPlan.id);
       }
     } catch (err) {
       console.error('Error rejecting changeset:', err);
@@ -309,8 +300,7 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({ repo, onSelectFile, 
               <select
                 value={currentPlan?.id || ''}
                 onChange={(e) => {
-                  const selected = previousPlans.find((p) => p.id === e.target.value);
-                  if (selected) setCurrentPlan(selected);
+                  setSelectedPlanId(e.target.value);
                 }}
                 className="bg-[#1c1e26] border border-[#48454d]/40 text-xs font-mono text-[#cac5ce] rounded-xl px-3 py-1.5 focus:outline-none focus:border-[#fbcfe8]/60 cursor-pointer"
               >
@@ -801,8 +791,7 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({ repo, onSelectFile, 
             changeset={currentChangeset}
             allChangesets={allChangesets}
             onSelectChangeset={(id) => {
-              const selected = allChangesets.find((c) => c.id === id);
-              if (selected) setCurrentChangeset(selected);
+              setSelectedChangesetId(id);
             }}
             onApprove={handleApproveChangeset}
             onReject={handleRejectChangeset}

@@ -1,6 +1,8 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { useArchitecture, invalidateArchitecture, invalidateRepository } from '@/lib/api/queries';
 import { Repository, ArchitectureFlow, ArchitectureFlowNode } from '@/types';
 
 export interface RepositorySummaryViewProps {
@@ -18,11 +20,13 @@ export const RepositorySummaryView: React.FC<RepositorySummaryViewProps> = ({
   onNavigateToArchitectureNode,
   onAskQuestion
 }) => {
+  const queryClient = useQueryClient();
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [localSummary, setLocalSummary] = useState(repo.summary);
-  const [flowData, setFlowData] = useState<ArchitectureFlow | null>(
-    repo.summary?.architectureFlow || null
-  );
+
+  const { data: cachedFlow } = useArchitecture(repo.id, repo.summary?.architectureFlow);
+  const flowData: ArchitectureFlow | null =
+    cachedFlow || localSummary?.architectureFlow || repo.summary?.architectureFlow || null;
 
   const stats = repo.stats || {
     classes: 0,
@@ -46,34 +50,6 @@ export const RepositorySummaryView: React.FC<RepositorySummaryViewProps> = ({
 
   const technologies = repo.technologies || [];
 
-  // If architectureFlow is not present in repository summary, fetch it from API
-  useEffect(() => {
-    if (summary.architectureFlow && summary.architectureFlow.nodes?.length > 0) {
-      setFlowData(summary.architectureFlow);
-      return;
-    }
-
-    let isMounted = true;
-    async function loadArchitecture() {
-      try {
-        const res = await fetch(`/api/repositories/${repo.id}/architecture`);
-        if (res.ok) {
-          const data = await res.json();
-          if (isMounted && data?.nodes?.length > 0) {
-            setFlowData(data);
-          }
-        }
-      } catch (err) {
-        console.error('Failed to load architecture flow:', err);
-      }
-    }
-
-    loadArchitecture();
-    return () => {
-      isMounted = false;
-    };
-  }, [repo.id, summary.architectureFlow]);
-
   const handleRegenerateSummary = async () => {
     if (isRegenerating) return;
     setIsRegenerating(true);
@@ -83,9 +59,8 @@ export const RepositorySummaryView: React.FC<RepositorySummaryViewProps> = ({
         const data = await res.json();
         if (data.summary) {
           setLocalSummary(data.summary);
-          if (data.summary.architectureFlow) {
-            setFlowData(data.summary.architectureFlow);
-          }
+          invalidateArchitecture(queryClient, repo.id);
+          invalidateRepository(queryClient, repo.id);
         }
       }
     } catch (e) {
