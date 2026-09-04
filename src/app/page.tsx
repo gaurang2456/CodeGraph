@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
 import {
@@ -271,6 +271,61 @@ export default function Home() {
     setIsRightPanelOpen(true);
   };
 
+  const handlePersistGraphUiState = useCallback(
+    (state: GraphPersistedUiState) => {
+      if (!activeRepo?.id) return;
+      setGraphUiStateByRepo((prev) => {
+        const existing = prev[activeRepo.id];
+        if (
+          existing?.selectedNodeId === state.selectedNodeId &&
+          existing?.layoutDirection === state.layoutDirection &&
+          existing?.filterState === state.filterState &&
+          existing?.focusState === state.focusState &&
+          existing?.hierarchyState === state.hierarchyState
+        ) {
+          return prev;
+        }
+        return { ...prev, [activeRepo.id]: state };
+      });
+    },
+    [activeRepo?.id]
+  );
+
+  const handlePersistFilesUiState = useCallback(
+    (state: FilesPersistedUiState) => {
+      if (!activeRepo?.id) return;
+      setFilesUiStateByRepo((prev) => {
+        const existing = prev[activeRepo.id];
+        if (
+          existing?.activeTab === state.activeTab &&
+          existing?.openTabs === state.openTabs &&
+          existing?.expandedFolders === state.expandedFolders
+        ) {
+          return prev;
+        }
+        return { ...prev, [activeRepo.id]: state };
+      });
+    },
+    [activeRepo?.id]
+  );
+
+  const handlePersistAnalysisUiState = useCallback(
+    (state: AnalysisPersistedUiState) => {
+      if (!activeRepo?.id) return;
+      setAnalysisUiStateByRepo((prev) => {
+        const existing = prev[activeRepo.id];
+        if (
+          existing?.selectedPlanId === state.selectedPlanId &&
+          existing?.selectedChangesetId === state.selectedChangesetId
+        ) {
+          return prev;
+        }
+        return { ...prev, [activeRepo.id]: state };
+      });
+    },
+    [activeRepo?.id]
+  );
+
   return (
     <div className="bg-[#121316] text-[#e3e2e6] min-h-screen flex flex-col font-sans selection:bg-[#fbcfe8]/20 selection:text-[#fbcfe8]">
       {/* Top Fixed Header */}
@@ -362,11 +417,7 @@ export default function Home() {
                 <DependencyGraphView
                   repo={activeRepo}
                   persistedUiState={activeRepo?.id ? graphUiStateByRepo[activeRepo.id] : undefined}
-                  onPersistUiState={(state) => {
-                    if (activeRepo?.id) {
-                      setGraphUiStateByRepo((prev) => ({ ...prev, [activeRepo.id]: state }));
-                    }
-                  }}
+                  onPersistUiState={handlePersistGraphUiState}
                   onSelectFile={handleSelectFileFromAnywhere}
                   onAskAi={handleAskAiFromAnywhere}
                 />
@@ -382,11 +433,7 @@ export default function Home() {
                   onFileSelect={handleSelectFileFromAnywhere}
                   onAskAi={handleAskAiFromAnywhere}
                   persistedUiState={activeRepo?.id ? filesUiStateByRepo[activeRepo.id] : undefined}
-                  onPersistUiState={(state) => {
-                    if (activeRepo?.id) {
-                      setFilesUiStateByRepo((prev) => ({ ...prev, [activeRepo.id]: state }));
-                    }
-                  }}
+                  onPersistUiState={handlePersistFilesUiState}
                 />
               )}
 
@@ -394,11 +441,7 @@ export default function Home() {
                 <AnalysisView
                   repo={activeRepo}
                   persistedUiState={activeRepo?.id ? analysisUiStateByRepo[activeRepo.id] : undefined}
-                  onPersistUiState={(state) => {
-                    if (activeRepo?.id) {
-                      setAnalysisUiStateByRepo((prev) => ({ ...prev, [activeRepo.id]: state }));
-                    }
-                  }}
+                  onPersistUiState={handlePersistAnalysisUiState}
                   onSelectFile={handleSelectFileFromAnywhere}
                   onAskAi={handleAskAiFromAnywhere}
                 />

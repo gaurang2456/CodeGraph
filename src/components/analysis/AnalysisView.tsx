@@ -92,13 +92,24 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
     allChangesets[0] ||
     null;
 
-  // Persist lightweight UI state to parent
+  // Stable ref for onPersistUiState to prevent infinite re-render loops
+  const onPersistUiStateRef = useRef(onPersistUiState);
   useEffect(() => {
-    onPersistUiState?.({
+    onPersistUiStateRef.current = onPersistUiState;
+  }, [onPersistUiState]);
+
+  // Persist lightweight UI state to parent on changes (skipping initial mount)
+  const isMountedRef = useRef(false);
+  useEffect(() => {
+    if (!isMountedRef.current) {
+      isMountedRef.current = true;
+      return;
+    }
+    onPersistUiStateRef.current?.({
       selectedPlanId: currentPlan?.id || null,
       selectedChangesetId: currentChangeset?.id || null,
     });
-  }, [currentPlan?.id, currentChangeset?.id, onPersistUiState]);
+  }, [currentPlan?.id, currentChangeset?.id]);
 
   // Plan loading animation cycle
   useEffect(() => {

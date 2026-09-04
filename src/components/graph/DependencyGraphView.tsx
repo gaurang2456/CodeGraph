@@ -98,16 +98,27 @@ function InnerCodeGraphView({
     persistedUiState?.layoutDirection || 'TB'
   );
 
-  // Sync state to parent for lightweight persistence
+  // Stable ref for onPersistUiState to prevent infinite re-render loops
+  const onPersistUiStateRef = useRef(onPersistUiState);
   useEffect(() => {
-    onPersistUiState?.({
+    onPersistUiStateRef.current = onPersistUiState;
+  }, [onPersistUiState]);
+
+  // Sync state to parent on user changes (skipping initial mount)
+  const isMountedRef = useRef(false);
+  useEffect(() => {
+    if (!isMountedRef.current) {
+      isMountedRef.current = true;
+      return;
+    }
+    onPersistUiStateRef.current?.({
       filterState,
       focusState,
       hierarchyState,
       selectedNodeId,
       layoutDirection,
     });
-  }, [filterState, focusState, hierarchyState, selectedNodeId, layoutDirection, onPersistUiState]);
+  }, [filterState, focusState, hierarchyState, selectedNodeId, layoutDirection]);
 
   // History stack for back navigation to last opened state
   const [history, setHistory] = useState<

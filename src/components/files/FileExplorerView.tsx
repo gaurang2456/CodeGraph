@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Repository, FileTreeNode } from '@/types';
 import { useRepositoryFiles, useFileContent } from '@/lib/api/queries';
 
@@ -80,14 +80,25 @@ export const FileExplorerView: React.FC<FileExplorerViewProps> = ({
     }
   }, [filesData?.snippets]);
 
-  // Sync state back to parent
+  // Stable ref for onPersistUiState to prevent infinite re-render loops
+  const onPersistUiStateRef = useRef(onPersistUiState);
   useEffect(() => {
-    onPersistUiState?.({
+    onPersistUiStateRef.current = onPersistUiState;
+  }, [onPersistUiState]);
+
+  // Sync state back to parent on user changes (skipping initial mount)
+  const isMountedRef = useRef(false);
+  useEffect(() => {
+    if (!isMountedRef.current) {
+      isMountedRef.current = true;
+      return;
+    }
+    onPersistUiStateRef.current?.({
       openTabs,
       activeTab,
       expandedFolders,
     });
-  }, [openTabs, activeTab, expandedFolders, onPersistUiState]);
+  }, [openTabs, activeTab, expandedFolders]);
 
   // Initial tab selection if none open
   useEffect(() => {
