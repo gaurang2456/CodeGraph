@@ -38,6 +38,14 @@ export async function middleware(request: NextRequest) {
   const isAuthRoute = pathname.startsWith('/login') || pathname.startsWith('/signup') || pathname.startsWith('/auth');
   const isPublicAsset = pathname.startsWith('/_next') || pathname.startsWith('/api') || pathname.includes('.');
 
+  // If Supabase OAuth returns code to root or another route instead of /auth/callback,
+  // automatically forward it to /auth/callback to exchange the code for a session
+  if (request.nextUrl.searchParams.has('code') && !pathname.startsWith('/auth')) {
+    const callbackUrl = request.nextUrl.clone();
+    callbackUrl.pathname = '/auth/callback';
+    return NextResponse.redirect(callbackUrl);
+  }
+
   // If unauthenticated and accessing protected page -> redirect to /login
   if (!user && !isAuthRoute && !isPublicAsset) {
     const url = request.nextUrl.clone();
