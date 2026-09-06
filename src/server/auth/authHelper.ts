@@ -99,15 +99,9 @@ export async function requireRepositoryAccess(
 
   const repository = res.rows[0];
 
-  // If repository is owned by another user -> strict 404 to avoid leaking existence
-  if (repository.user_id && repository.user_id !== user.id) {
+  // Enforce strict ownership: user must own the repository
+  if (repository.user_id !== user.id) {
     throw new AuthError('Repository not found.', 404, 'NOT_FOUND');
-  }
-
-  // If legacy repository has no user_id, bind it to current user for migration safety
-  if (!repository.user_id) {
-    await query(`UPDATE repositories SET user_id = $1 WHERE id = $2`, [user.id, repositoryId]);
-    repository.user_id = user.id;
   }
 
   return { user, repository };

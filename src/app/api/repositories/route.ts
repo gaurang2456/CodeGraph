@@ -10,13 +10,13 @@ export async function GET(req: NextRequest) {
     await ensureDatabaseSchema();
     const user = await requireUser(req);
 
-    // Return only repositories belonging to the authenticated user (or legacy dev repos)
+    // Return only repositories strictly belonging to the authenticated user
     const result = await query(
       `SELECT id, name, full_name, source_type, github_url, branch, user_id, status, stage, progress,
               file_count, folder_count, line_count, token_count, primary_language, framework,
               technologies, summary, stats, error_message, created_at, updated_at
        FROM repositories
-       WHERE user_id = $1 OR user_id IS NULL
+       WHERE user_id = $1
        ORDER BY created_at DESC`,
       [user.id]
     );

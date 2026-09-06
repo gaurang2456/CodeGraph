@@ -11,6 +11,7 @@ export interface RepositorySummaryViewProps {
   onNavigateToFiles?: () => void;
   onNavigateToArchitectureNode?: (node: ArchitectureFlowNode) => void;
   onAskQuestion?: (question: string) => void;
+  onDeleteRepo?: (repoId: string, repoName: string) => void;
 }
 
 export const RepositorySummaryView: React.FC<RepositorySummaryViewProps> = ({
@@ -18,7 +19,8 @@ export const RepositorySummaryView: React.FC<RepositorySummaryViewProps> = ({
   onNavigateToGraph,
   onNavigateToFiles,
   onNavigateToArchitectureNode,
-  onAskQuestion
+  onAskQuestion,
+  onDeleteRepo,
 }) => {
   const queryClient = useQueryClient();
   const [isRegenerating, setIsRegenerating] = useState(false);
@@ -159,10 +161,29 @@ export const RepositorySummaryView: React.FC<RepositorySummaryViewProps> = ({
             {onNavigateToGraph && (
               <button
                 onClick={onNavigateToGraph}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#fbcfe8] hover:bg-[#fbcfe8]/90 text-[#121316] text-xs font-medium transition-colors shadow-sm"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#fbcfe8] hover:bg-[#fbcfe8]/90 text-[#121316] text-xs font-medium transition-colors shadow-sm cursor-pointer"
               >
                 <span className="material-symbols-outlined text-[16px]">account_tree</span>
                 Explore Architecture Graph
+              </button>
+            )}
+
+            {onDeleteRepo && (
+              <button
+                onClick={() => {
+                  if (
+                    window.confirm(
+                      `Are you sure you want to delete "${repo.name}"? All indexed files, graph relationships, and feature plans will be permanently removed.`
+                    )
+                  ) {
+                    onDeleteRepo(repo.id, repo.name);
+                  }
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 hover:text-red-300 text-xs font-medium transition-colors border border-red-500/25 cursor-pointer"
+                title="Delete this repository"
+              >
+                <span className="material-symbols-outlined text-[16px]">delete</span>
+                Delete
               </button>
             )}
           </div>

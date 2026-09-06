@@ -231,6 +231,28 @@ export default function Home() {
     setActiveTab('summary');
   };
 
+  const handleDeleteRepo = async (repoId: string) => {
+    try {
+      const res = await fetch(`/api/repositories/${repoId}`, { method: 'DELETE' });
+      if (!res.ok) {
+        throw new Error('Failed to delete repository');
+      }
+      await invalidateRepositories(queryClient);
+      const remaining = repositories.filter((r) => r.id !== repoId);
+      if (activeRepoId === repoId) {
+        if (remaining.length > 0) {
+          setActiveRepoId(remaining[0].id);
+        } else {
+          setActiveRepoId(null);
+          setShowLanding(true);
+        }
+      }
+    } catch (err) {
+      console.error('Delete repository error:', err);
+      alert('Failed to delete repository. Please try again.');
+    }
+  };
+
   const handleSelectFileFromAnywhere = (filename: string, startLine?: number, endLine?: number) => {
     pushNavHistory();
     setSelectedFile(filename);
@@ -349,6 +371,7 @@ export default function Home() {
         onGoBack={handleGoBack}
         theme={theme}
         onToggleTheme={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))}
+        onDeleteRepo={handleDeleteRepo}
       />
 
       {/* Main Workspace Body */}
@@ -410,6 +433,7 @@ export default function Home() {
                   }}
                   onNavigateToArchitectureNode={handleNavigateToArchitectureLayer}
                   onAskQuestion={handleAskAiFromAnywhere}
+                  onDeleteRepo={handleDeleteRepo}
                 />
               )}
 

@@ -19,6 +19,7 @@ export interface NavbarProps {
   theme: 'dark' | 'light';
   onToggleTheme: () => void;
   onToggleRightPanel?: () => void;
+  onDeleteRepo?: (repoId: string, repoName: string) => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -33,7 +34,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   onSearchChange,
   theme,
   onToggleTheme,
-  onToggleRightPanel
+  onToggleRightPanel,
+  onDeleteRepo,
 }) => {
   const router = useRouter();
   const [isRepoDropdownOpen, setIsRepoDropdownOpen] = useState(false);
@@ -163,26 +165,48 @@ export const Navbar: React.FC<NavbarProps> = ({
               </div>
               <div className="space-y-0.5 max-h-56 overflow-y-auto">
                 {repositories.map((repo) => (
-                  <button
+                  <div
                     key={repo.id}
-                    onClick={() => {
-                      onSelectRepo(repo);
-                      setIsRepoDropdownOpen(false);
-                    }}
-                    className={`w-full text-left px-3 py-2 rounded-lg text-xs flex items-center justify-between transition-colors ${
+                    className={`group/repo w-full px-2.5 py-1.5 rounded-lg text-xs flex items-center justify-between transition-colors ${
                       activeRepo?.id === repo.id
                         ? 'bg-[#70485c]/30 text-[#fbcfe8] font-medium border border-[#fbcfe8]/20'
                         : 'text-[#cac5ce] hover:bg-[#292a2d] hover:text-white'
                     }`}
                   >
-                    <div className="flex items-center gap-2 truncate">
-                      <span className="material-symbols-outlined text-[15px] text-[#b7c8e1]">source</span>
+                    <button
+                      onClick={() => {
+                        onSelectRepo(repo);
+                        setIsRepoDropdownOpen(false);
+                      }}
+                      className="flex items-center gap-2 truncate flex-1 text-left cursor-pointer focus:outline-none"
+                    >
+                      <span className="material-symbols-outlined text-[15px] text-[#b7c8e1] shrink-0">source</span>
                       <span className="truncate">{repo.name}</span>
+                    </button>
+                    <div className="flex items-center gap-1 shrink-0 ml-1.5">
+                      {activeRepo?.id === repo.id && (
+                        <span className="material-symbols-outlined text-[14px] text-[#fbcfe8]">check</span>
+                      )}
+                      {onDeleteRepo && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (
+                              window.confirm(
+                                `Delete "${repo.name}" from your history? All associated graph data, files, and feature plans will be removed.`
+                              )
+                            ) {
+                              onDeleteRepo(repo.id, repo.name);
+                            }
+                          }}
+                          title={`Delete ${repo.name}`}
+                          className="opacity-0 group-hover/repo:opacity-100 hover:text-red-400 p-0.5 rounded transition-all cursor-pointer text-[#938f98]"
+                        >
+                          <span className="material-symbols-outlined text-[15px]">delete</span>
+                        </button>
+                      )}
                     </div>
-                    {activeRepo?.id === repo.id && (
-                      <span className="material-symbols-outlined text-[14px] text-[#fbcfe8]">check</span>
-                    )}
-                  </button>
+                  </div>
                 ))}
 
                 {repositories.length === 0 && (
