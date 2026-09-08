@@ -1,714 +1,1092 @@
 # CodeGraph
 
-> AI-powered repository intelligence and developer workflow platform.
+### AI-Powered Repository Intelligence & Developer Workflow
 
-CodeGraph helps developers understand, explore, modify, validate, and ship changes to a software repository using AI.
+CodeGraph is an AI-powered developer tool that helps developers **understand, explore, modify, validate, and ship codebases**.
 
-Instead of treating a repository as a collection of files, CodeGraph builds an intelligent representation of the codebase using semantic search, AST analysis, code relationships, and architecture visualization.
+Instead of treating a repository as a collection of files, CodeGraph builds an understanding of the codebase using:
 
-It can then use that understanding to plan features, generate code changes, validate them, and turn approved changes into a GitHub Pull Request.
+- Semantic search
+- Vector embeddings
+- RAG
+- AST-based code analysis
+- Code relationships
+- Architecture visualization
+- AI-powered feature planning
+- AI-generated code changes
+- Diff-based review
+- Automated validation
+- GitHub integration
+
+The goal is simple:
+
+> **Understand the codebase before changing it, review changes before applying them, and never silently destroy existing work.**
 
 ---
 
-## ✨ Features
+## 🚀 What CodeGraph Does
 
-### 📦 Repository Ingestion
+CodeGraph provides an end-to-end workflow for working with unfamiliar or complex repositories.
 
-Import repositories into CodeGraph using:
+```text
+Repository
+    ↓
+Repository Analysis
+    ↓
+Semantic Search + Code Graph
+    ↓
+Architecture Understanding
+    ↓
+AI Feature Planning
+    ↓
+AI Code Generation
+    ↓
+Diff Review
+    ↓
+Validation
+    ↓
+Human Approval
+    ↓
+GitHub Feature Branch
+    ↓
+Commit & Push
+    ↓
+Pull Request
+```
 
+This allows developers to move from **understanding a repository** to **safely implementing a feature** without losing control of the changes.
+
+---
+
+# ✨ Features
+
+## 📦 Repository Ingestion
+
+CodeGraph can ingest repositories from:
+
+- Uploaded repository files
 - GitHub repository URLs
-- ZIP uploads
+- Connected GitHub accounts
 
-CodeGraph analyzes the repository and stores its source files for further analysis.
-
----
-
-### 🧠 Semantic Code Search
-
-CodeGraph uses embeddings and vector search to retrieve relevant parts of a repository.
-
-This allows AI features to work with relevant repository context instead of blindly sending the entire codebase to an LLM.
+During ingestion, the repository is analyzed and its contents are stored for further processing.
 
 ---
 
-### 🕸️ AST-Based Code Graph
+## 🔎 Semantic Code Search
 
-CodeGraph analyzes TypeScript/JavaScript source code using AST analysis and extracts:
+CodeGraph converts repository content into semantic chunks and generates vector embeddings.
+
+This enables meaning-based search instead of relying only on exact keyword matching.
+
+For example, instead of searching for:
+
+```text
+authentication
+```
+
+CodeGraph can retrieve code related to:
+
+- Login
+- Sessions
+- OAuth
+- JWT handling
+- User authentication middleware
+
+even when the exact search term does not appear in the source code.
+
+---
+
+## 🧠 Repository-Aware AI Chat
+
+CodeGraph provides an AI chat interface that uses repository context to answer questions about the codebase.
+
+The system uses Retrieval-Augmented Generation (RAG) to retrieve relevant code before generating a response.
+
+Responses can include citations pointing back to relevant repository files.
+
+Example questions:
+
+```text
+How does authentication work in this project?
+
+Where is the database connection initialized?
+
+Which files are responsible for user registration?
+
+How does the application handle API errors?
+
+What would I need to change to add email verification?
+```
+
+---
+
+# 🕸️ AST-Based Code Graph
+
+CodeGraph uses AST analysis to understand the structure of the source code.
+
+The system extracts symbols such as:
 
 - Classes
-- Interfaces
 - Functions
+- Interfaces
 - Methods
 - Variables
 - Imports
-- Exports
-- Inheritance
-- Implementations
-- Dependency relationships
-- Function calls
-- Dependency injection relationships
 
-The extracted information is stored as a code graph that can be queried and visualized.
+It also builds relationships between symbols.
 
----
-
-### 🏗️ Architecture Visualization
-
-CodeGraph automatically builds a high-level architecture view of the repository.
-
-Depending on the detected project structure, it can identify architectural components such as:
-
-- Controllers
-- Services
-- Repositories
-- Modules
-- Components
-- Database layers
-- External integrations
-
-The architecture view provides a visual representation of how different parts of the codebase are connected.
-
----
-
-### 📁 Intelligent File Explorer
-
-Browse the analyzed repository through an interactive file explorer.
-
-The system supports:
-
-- Hierarchical file navigation
-- File selection
-- Source code viewing
-- Architecture-to-file navigation
-- Symbol-aware navigation
-
-File contents are loaded when needed rather than unnecessarily transferring the entire repository.
-
----
-
-### 💬 Repository-Aware AI Chat
-
-Ask questions about the repository using natural language.
-
-Examples:
+Supported relationship types include:
 
 ```text
-How does authentication work?
-
-Where is user creation handled?
-
-What calls the PaymentService?
-
-Explain the architecture of this project.
-
-Where should I add caching?
-
-What happens when a user signs up?
+IMPORTS
+EXTENDS
+IMPLEMENTS
+USES
+INJECTS
+CALLS
 ```
 
-Responses can reference relevant repository files and code context.
+This creates a graph representation of how different parts of the repository interact.
 
-📝 AI Feature Planning
+---
 
-Describe a feature in natural language and CodeGraph creates a structured implementation plan.
+# 🏗️ Architecture Visualization
 
-Example:
+The extracted code relationships are used to generate an interactive architecture view.
 
-Add caching to the agent repository.
+Instead of manually searching through hundreds of files, developers can visually explore relationships between different parts of the codebase.
 
-The planner can identify:
+The architecture graph can help answer questions such as:
 
-Relevant files
-Required changes
-Affected components
-Dependencies
-Implementation steps
-Potential considerations
-🤖 AI Code Generation
+```text
+Which components depend on this class?
 
-After reviewing a feature plan, CodeGraph can generate concrete code changes.
+Where is this service used?
 
-Generated changes are represented as versioned changesets rather than directly modifying the repository.
+Which files import this module?
 
-Each changeset contains:
+What extends this base class?
 
-Changed files
-Change type
-Original content
-Proposed content
-Reason for the change
-Affected symbols
+What parts of the system are connected to this component?
+```
 
-This makes generated changes reviewable and reversible.
+---
 
-🔍 Diff Viewer
+# 📁 File Explorer
 
-Review generated code changes before they are applied.
+CodeGraph includes a repository file explorer for navigating analyzed repositories.
 
-Supported views include:
+Developers can:
 
-Unified diff
-Side-by-side diff
-File-by-file changes
-Changeset versions
+- Browse repository files
+- Navigate directories
+- Open source files
+- Inspect file contents
+- Move between architecture nodes and their corresponding files
 
-Users can:
+This connects the abstract architecture graph back to the actual source code.
 
-Review changes
-Approve changes
-Reject changes
-Regenerate changes
-Switch between changeset versions
+---
 
-The original repository content remains the source of truth.
+# 🔐 Authentication
 
-🧪 Automated Validation
+CodeGraph supports authentication through Supabase Auth.
 
-CodeGraph creates a temporary workspace from the repository and validates proposed changes against the target project's own tooling.
+Supported authentication methods include:
 
-Depending on the repository, validation can include:
+- Email / Password
+- Google OAuth
+- GitHub OAuth
 
-TypeScript type checking
-Build validation
-Tests
+GitHub authentication also enables authenticated GitHub operations after the user connects their account.
 
-Validation is repository-aware.
+Sensitive GitHub provider tokens remain server-side and are not exposed to the frontend.
 
-If a validation tool is not applicable, it is skipped rather than incorrectly reported as a failure.
+---
+
+# 📝 AI Feature Planning
+
+CodeGraph can turn a natural-language feature request into an implementation plan.
 
 For example:
 
-No tsconfig.json found.
+```text
+Add email verification to the registration flow.
+```
 
-TypeScript validation skipped because
-TypeScript configuration is not applicable
-to this repository.
-🔐 GitHub OAuth Integration
+The AI analyzes the repository and produces a structured feature plan identifying the files and areas that need to change.
 
-CodeGraph supports connecting a GitHub account through OAuth.
+The planning stage is designed to happen **before code generation**.
 
-GitHub authentication is handled through Supabase Auth.
+---
 
-GitHub access tokens remain server-side and are never exposed to the frontend.
+# 🤖 AI Code Generation
 
-🌿 Safe GitHub Branch Creation
+After approving a feature plan, CodeGraph can generate the required code changes.
 
-Approved changesets can be applied to a dedicated GitHub feature branch.
+Instead of immediately modifying the repository, the generated changes are represented as a versioned changeset.
 
-CodeGraph:
+This provides a controlled workflow:
 
-Detects the repository's default branch.
-Retrieves its current commit.
-Creates a dedicated feature branch.
-Verifies repository access.
-Verifies changeset ownership.
-Verifies approval and validation state.
-Checks for repository drift.
-Applies file changes using GitHub's Git Data APIs.
+```text
+Feature Request
+      ↓
+AI Analysis
+      ↓
+Feature Plan
+      ↓
+Human Approval
+      ↓
+Code Generation
+      ↓
+Versioned Changeset
+```
 
-The default branch is never modified directly.
+---
 
-🧩 Repository Drift Protection
+# 🔀 Versioned Changesets
 
-Before applying generated changes, CodeGraph verifies that the source files have not changed since the changeset was generated.
+Generated changes are stored as immutable/versioned changesets.
 
-For modified or deleted files, CodeGraph compares the current GitHub content with the original content stored in the changeset.
+This makes it possible to:
 
-If the repository has changed:
+- Review generated changes
+- Compare different versions
+- Approve changes
+- Reject changes
+- Regenerate changes
+- Track the state of proposed modifications
 
-Repository changed since this changeset
-was generated.
+The original repository is not immediately overwritten.
 
-Regenerate the changeset before applying it.
+---
 
-The operation is aborted instead of overwriting newer developer changes.
+# 📊 Diff Viewer
 
-📌 GitHub Commit & Push
+CodeGraph provides a Git-style diff viewer for generated changes.
 
-Approved changes can be committed to the CodeGraph-created feature branch.
+Developers can inspect:
 
-Multiple file changes are represented as a single Git commit.
+- Added files
+- Modified files
+- Deleted files
+- Added lines
+- Removed lines
+- Original content
+- Proposed content
 
-The workflow protects against:
+The diff can be viewed in a unified or side-by-side format.
 
-Default branch modification
-Duplicate commits
-Unexpected branch changes
-Repository drift
-🔀 Pull Request Creation
+The workflow is intentionally:
 
-After the changes have been committed, CodeGraph can create a Pull Request on GitHub.
+```text
+Generate
+   ↓
+Review Diff
+   ↓
+Validate
+   ↓
+Approve
+```
 
-The generated PR includes:
+rather than blindly applying AI-generated code.
 
-Feature title
-Feature summary
-Changed files
-Validation information
-Changeset version
-Source branch
-Target branch
+---
 
-CodeGraph also prevents duplicate Pull Requests for the same changeset.
+# 🧪 Automated Code Validation
 
-🔄 Complete Workflow
+Before changes are shipped, CodeGraph can validate the proposed changes inside a temporary workspace.
 
-The complete CodeGraph developer workflow is:
+Validation can detect and use repository tooling where applicable.
 
-                  GitHub / ZIP Repository
-                           │
-                           ▼
-                  Repository Ingestion
-                           │
-                           ▼
-              ┌────────────────────────┐
-              │ Repository Intelligence│
-              │                        │
-              │ Semantic Search        │
-              │ Embeddings             │
-              │ AST Analysis           │
-              │ Code Relationships     │
-              │ Architecture           │
-              └────────────┬───────────┘
-                           │
-                           ▼
-                    AI Feature Plan
-                           │
-                           ▼
-                    AI Code Changes
-                           │
-                           ▼
-                       Diff Review
-                           │
-                           ▼
-                       Validation
-                           │
-                           ▼
-                        Approval
-                           │
-                           ▼
-                   GitHub Feature Branch
-                           │
-                           ▼
-                         Commit
-                           │
-                           ▼
-                     Pull Request
+For example:
 
-The goal is to keep the developer in control while automating the repetitive parts of repository analysis and implementation.
-
-🏛️ Architecture
-
-CodeGraph is built around several major layers.
-
-┌─────────────────────────────────────────────┐
-│                  Frontend                   │
-│                                             │
-│ Next.js + React                             │
-│ Repository UI                               │
-│ Architecture Graph                          │
-│ File Explorer                               │
-│ AI Chat                                     │
-│ Feature Planner                             │
-│ Diff Viewer                                 │
-└──────────────────────┬──────────────────────┘
-                       │
-                       ▼
-┌─────────────────────────────────────────────┐
-│                  API Layer                  │
-│                                             │
-│ Next.js Route Handlers                      │
-│ Authentication                             │
-│ Repository APIs                             │
-│ Planning APIs                               │
-│ Changeset APIs                              │
-│ GitHub APIs                                 │
-└──────────────────────┬──────────────────────┘
-                       │
-          ┌────────────┼─────────────┐
-          ▼            ▼             ▼
-┌──────────────┐ ┌─────────────┐ ┌──────────────┐
-│ Repository   │ │ AI / RAG    │ │ GitHub       │
-│ Analysis     │ │ Pipeline    │ │ Integration  │
-│              │ │             │ │              │
-│ AST          │ │ Embeddings  │ │ OAuth        │
-│ Symbols      │ │ Retrieval   │ │ Branches     │
-│ Relationships│ │ Planning    │ │ Commits      │
-│ Architecture │ │ Generation  │ │ Pull Requests│
-└──────┬───────┘ └──────┬──────┘ └──────────────┘
-       │                │
-       └────────┬───────┘
-                ▼
-┌─────────────────────────────────────────────┐
-│                Supabase                     │
-│                                             │
-│ PostgreSQL                                  │
-│ pgvector                                    │
-│ Supabase Auth                               │
-│ Repository Data                             │
-│ Code Graph                                  │
-│ Changesets                                  │
-│ Validation                                  │
-└─────────────────────────────────────────────┘
-🛠️ Tech Stack
-Frontend
-Next.js
-React
+```text
 TypeScript
-Tailwind CSS
-Backend
-Next.js Route Handlers
-TypeScript
-Server-side services
-Database
-Supabase
-PostgreSQL
-pgvector
-Authentication
-Supabase Auth
-Email/password authentication
-Google OAuth
-GitHub OAuth
-Code Analysis
-TypeScript AST
-ts-morph
-AI / RAG
-Embeddings
-Vector similarity search
-Retrieval-Augmented Generation
-LLM-based planning and code generation
-GitHub
-GitHub REST API
-Git Data API
-GitHub OAuth
-Deployment
-Render
-📂 Project Structure
+Build
+Tests
+```
 
-A simplified project structure:
+Validation is repository-aware.
 
+If a particular validation method is not applicable, it is skipped instead of being incorrectly reported as a failure.
+
+For example, a repository without a `tsconfig.json` should not be treated as a TypeScript validation failure.
+
+Validation states distinguish between:
+
+```text
+PASSED
+FAILED
+SKIPPED
+ERROR
+```
+
+This prevents missing tooling from being confused with broken code.
+
+---
+
+# 🐙 GitHub Integration
+
+CodeGraph integrates with GitHub to provide a controlled path from generated code to an actual repository change.
+
+The GitHub workflow is designed around feature branches rather than directly modifying the default branch.
+
+```text
+Approved Changeset
+       ↓
+GitHub Feature Branch
+       ↓
+Commit
+       ↓
+Push
+       ↓
+Pull Request
+```
+
+---
+
+# 🌿 Safe Feature Branches
+
+CodeGraph never directly modifies the repository's default branch during the feature workflow.
+
+Feature branches are created using a deterministic naming pattern:
+
+```text
+codegraph/feature-plan-{planId}-v{version}
+```
+
+The system dynamically detects the repository's default branch before creating the feature branch.
+
+---
+
+# 🛡️ Repository Drift Protection
+
+One of the most important safety mechanisms in CodeGraph is repository drift detection.
+
+Suppose CodeGraph generated a change based on:
+
+```text
+Version A
+```
+
+but the repository has since changed to:
+
+```text
+Version B
+```
+
+Applying the old changes blindly could overwrite newer developer work.
+
+CodeGraph therefore checks whether the repository still matches the state against which the changeset was generated.
+
+If the repository has drifted:
+
+```text
+STOP
+```
+
+rather than silently overwriting newer code.
+
+This is particularly important for AI-generated code changes.
+
+---
+
+# 💾 Git Commit & Push
+
+Approved changes can be committed to the generated GitHub feature branch.
+
+The workflow is designed to:
+
+- Avoid modifying the default branch
+- Create one logical commit per changeset
+- Prevent duplicate commits
+- Protect against branch SHA conflicts
+- Re-check repository state
+- Persist GitHub commit metadata
+
+---
+
+# 🔗 Pull Request Creation
+
+After changes are committed and pushed, CodeGraph can create a GitHub Pull Request.
+
+The Pull Request workflow includes:
+
+- Correct feature branch
+- Correct base branch
+- Deterministic title
+- Generated description
+- Validation summary
+- Changeset information
+
+CodeGraph does **not automatically merge the Pull Request**.
+
+The final merge decision remains with the developer.
+
+---
+
+# 🧩 System Architecture
+
+```text
+┌───────────────────────────────────────────────┐
+│                  Next.js App                  │
+│                                               │
+│  Repository UI                                │
+│  File Explorer                                │
+│  Architecture Graph                           │
+│  AI Chat                                      │
+│  Feature Planning                             │
+│  Diff Viewer                                  │
+│  Validation                                   │
+│  GitHub Workflow                              │
+└───────────────────────┬───────────────────────┘
+                        │
+                        ▼
+┌───────────────────────────────────────────────┐
+│              Next.js API Routes               │
+│                                               │
+│  Repository APIs                              │
+│  RAG APIs                                     │
+│  Architecture APIs                            │
+│  Changeset APIs                               │
+│  Validation APIs                              │
+│  GitHub APIs                                  │
+└───────────────────────┬───────────────────────┘
+                        │
+            ┌───────────┴───────────┐
+            ▼                       ▼
+┌──────────────────────┐   ┌──────────────────────┐
+│      Supabase        │   │       GitHub         │
+│                      │   │                      │
+│ PostgreSQL           │   │ Repository           │
+│ pgvector             │   │ Branches             │
+│ Authentication       │   │ Commits              │
+│ Repository Data      │   │ Pull Requests        │
+│ Code Graph           │   │ Git Data API         │
+└──────────────────────┘   └──────────────────────┘
+```
+
+---
+
+# 🛠️ Tech Stack
+
+## Frontend
+
+- Next.js
+- React
+- TypeScript
+- Tailwind CSS
+
+## Backend
+
+- Next.js API Routes
+- TypeScript
+- Node.js
+
+## Database
+
+- Supabase
+- PostgreSQL
+- pgvector
+
+## Authentication
+
+- Supabase Auth
+- Google OAuth
+- GitHub OAuth
+
+## AI / RAG
+
+- Large Language Models
+- Embeddings
+- Vector similarity search
+- Retrieval-Augmented Generation
+
+## Code Analysis
+
+- TypeScript AST
+- `ts-morph`
+- Symbol extraction
+- Relationship analysis
+
+## GitHub
+
+- GitHub REST API
+- Git Data API
+- Branch creation
+- Commits
+- Pull Requests
+
+## Testing
+
+- TypeScript type checking
+- Automated test suite
+- Repository-aware validation
+
+---
+
+# 📂 Project Structure
+
+```text
 CodeGraph/
 │
 ├── src/
 │   ├── app/
 │   │   ├── api/
 │   │   │   ├── repositories/
-│   │   │   ├── feature-plans/
 │   │   │   ├── changesets/
-│   │   │   └── github/
+│   │   │   ├── github/
+│   │   │   ├── architecture/
+│   │   │   └── ...
 │   │   │
 │   │   ├── login/
 │   │   ├── signup/
 │   │   └── ...
 │   │
 │   ├── components/
-│   │   ├── analysis/
+│   │   ├── repository/
 │   │   ├── architecture/
-│   │   ├── files/
+│   │   ├── chat/
+│   │   ├── changesets/
 │   │   ├── github/
-│   │   ├── layout/
 │   │   └── ...
 │   │
-│   ├── server/
-│   │   ├── analyzer/
-│   │   ├── github/
-│   │   ├── planner/
-│   │   ├── rag/
-│   │   └── db/
-│   │
 │   ├── lib/
-│   ├── types/
+│   │   ├── ai/
+│   │   ├── github/
+│   │   ├── rag/
+│   │   ├── repository/
+│   │   ├── validation/
+│   │   └── ...
+│   │
 │   └── ...
 │
+├── supabase/
+│   └── migrations/
+│
+├── tests/
+│
 ├── public/
+│
 ├── package.json
-├── schema.sql
+├── tsconfig.json
 └── README.md
-🗄️ Data Model
+```
 
-Some of the major entities used by CodeGraph include:
+---
 
-User
- │
- ├── Repositories
- │      │
- │      ├── Repository Files
- │      ├── Code Symbols
- │      ├── Code Relationships
- │      └── Architecture
- │
- ├── Feature Plans
- │      │
- │      └── Changesets
- │             │
- │             ├── File Changes
- │             ├── Validations
- │             ├── GitHub Branch
- │             └── Pull Request
- │
- └── GitHub Connection
+# 🗄️ Core Data Model
 
-Important entities include:
+CodeGraph stores information about repositories, files, semantic chunks, code symbols, relationships, plans, changesets, and GitHub operations.
 
-repositories
-repository_files
-code_symbols
-code_relationships
-generated_changesets
-generated_file_changes
-changeset_validations
-changeset_branches
-GitHub connection data
-Pull Request metadata
-🔐 Security
+The main concepts include:
 
-CodeGraph is designed so that generated code is never blindly pushed to a user's default branch.
+```text
+Users
+  │
+  └── Repositories
+        │
+        ├── Repository Files
+        │      └── Semantic Chunks
+        │
+        ├── Code Symbols
+        │      └── Code Relationships
+        │
+        ├── Feature Plans
+        │      └── Changesets
+        │             ├── Validation
+        │             └── GitHub Branch
+        │                    ├── Commit
+        │                    └── Pull Request
+        │
+        └── Chat / RAG Context
+```
 
-Important safeguards include:
+---
 
-Authentication
+# 🔄 Complete Developer Workflow
 
-Protected operations require an authenticated CodeGraph user.
+## 1. Add a Repository
 
-Repository Ownership
+A developer uploads a repository or provides a GitHub repository.
 
-Changesets are associated with the user and repository that created them.
+```text
+Repository
+    ↓
+Ingestion
+    ↓
+File Storage
+```
 
-Changeset Approval
+---
 
-Only approved changesets can enter the GitHub write workflow.
+## 2. Analyze the Repository
 
+CodeGraph processes the repository and creates:
+
+```text
+Source Files
+     ↓
+Semantic Chunks
+     ↓
+Embeddings
+
+Source Files
+     ↓
+AST Analysis
+     ↓
+Symbols
+     ↓
+Relationships
+```
+
+---
+
+## 3. Understand the Architecture
+
+The generated symbols and relationships are used to build an architecture graph.
+
+Developers can navigate from graph nodes back to their source files.
+
+---
+
+## 4. Ask Questions
+
+The developer can use repository-aware AI chat.
+
+```text
+Question
+   ↓
+Semantic Retrieval
+   ↓
+Relevant Repository Context
+   ↓
+AI Response
+   ↓
+File Citations
+```
+
+---
+
+## 5. Request a Feature
+
+The developer describes a desired change.
+
+```text
+"Add password reset functionality."
+```
+
+CodeGraph analyzes the repository and generates a feature plan.
+
+---
+
+## 6. Review the Plan
+
+The developer reviews the proposed implementation before code generation.
+
+---
+
+## 7. Generate Code
+
+After approval, CodeGraph generates a versioned changeset.
+
+```text
+Feature Plan
+     ↓
+AI Code Generation
+     ↓
+Changeset
+```
+
+---
+
+## 8. Review the Diff
+
+The developer inspects the generated changes using the diff viewer.
+
+---
+
+## 9. Validate
+
+CodeGraph creates a temporary workspace and validates the proposed changes using applicable repository tooling.
+
+```text
+Changeset
+    ↓
+Temporary Workspace
+    ↓
+Apply Changes
+    ↓
 Validation
+```
 
-Explicit validation failures prevent changes from progressing.
+---
 
-Repository Drift Detection
+## 10. Approve
 
-Changes generated against outdated source code are rejected.
+Only after the developer reviews and approves the changes can they proceed to the GitHub workflow.
 
-Feature Branches
+---
 
-Changes are never directly written to the default branch.
+## 11. Create Feature Branch
 
-GitHub Tokens
+CodeGraph creates a dedicated feature branch.
 
-GitHub OAuth credentials are kept server-side.
+```text
+main
+ │
+ └── codegraph/feature-plan-...
+```
 
-They are never intentionally exposed to:
+The default branch is not directly modified.
 
-browser state
-API responses
-URLs
-frontend components
-logs
-🚀 Getting Started
-Prerequisites
+---
+
+## 12. Commit & Push
+
+The approved changes are committed and pushed to the feature branch.
+
+---
+
+## 13. Create Pull Request
+
+CodeGraph creates a Pull Request targeting the repository's default branch.
+
+The developer retains control over the final merge.
+
+---
+
+# 🔒 Security Principles
+
+CodeGraph follows several principles when handling repositories and GitHub operations.
+
+### No Direct Default-Branch Modification
+
+Generated changes are pushed to feature branches rather than directly modifying the default branch.
+
+### Human Approval
+
+AI-generated code is reviewed before being shipped.
+
+### Repository Drift Detection
+
+Changes are not blindly applied when the repository has changed since the changeset was generated.
+
+### Server-Side GitHub Credentials
+
+GitHub provider tokens are kept server-side and are not exposed to the client.
+
+### Temporary Validation Environments
+
+Proposed changes are validated in temporary workspaces rather than directly modifying the original repository.
+
+### Immutable Changesets
+
+Generated changes are represented as versioned changesets, allowing developers to review different generated versions.
+
+---
+
+# ⚙️ Getting Started
+
+## Prerequisites
 
 Make sure you have:
 
-Node.js
-npm
-A Supabase project
-PostgreSQL with pgvector enabled
-GitHub OAuth application credentials
-An LLM/embedding provider configuration
-Installation
+- Node.js
+- npm
+- A Supabase project
+- Required AI API credentials
+- GitHub OAuth configuration if GitHub features are enabled
 
-Clone the repository:
+---
 
+## 1. Clone the Repository
+
+```bash
 git clone <your-repository-url>
 cd CodeGraph
+```
 
-Install dependencies:
+---
 
+## 2. Install Dependencies
+
+```bash
 npm install
-Environment Variables
+```
 
-Create a .env.local file.
+---
 
-Example:
+## 3. Configure Environment Variables
 
-NEXT_PUBLIC_SUPABASE_URL=
-NEXT_PUBLIC_SUPABASE_ANON_KEY=
-SUPABASE_SERVICE_ROLE_KEY=
+Create a `.env.local` file:
 
-# AI provider
-OPENAI_API_KEY=
+```env
+NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 
-# GitHub OAuth / integration
-GITHUB_CLIENT_ID=
-GITHUB_CLIENT_SECRET=
+SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
 
-Use the environment variables expected by the current implementation.
+# AI provider configuration
+AI_API_KEY=your_ai_api_key
 
-Never commit secrets to Git.
+# GitHub OAuth / API configuration
+GITHUB_CLIENT_ID=your_github_client_id
+GITHUB_CLIENT_SECRET=your_github_client_secret
+```
 
-🗃️ Database Setup
+Use the exact environment variable names required by your current implementation.
 
-Create/configure a Supabase project and apply the database schema.
+Do not commit `.env.local` or any secret credentials to Git.
 
-The project uses PostgreSQL and pgvector for repository and semantic-search functionality.
+---
 
-Apply:
+# 🗃️ Database Setup
 
-src/server/db/schema.sql
+CodeGraph uses Supabase PostgreSQL with `pgvector`.
 
-or use the project's current database migration workflow if migrations are configured.
+Apply the database migrations located in:
 
-▶️ Running Locally
+```text
+supabase/migrations/
+```
+
+The database contains structures for concepts such as:
+
+```text
+Repositories
+Repository Files
+Semantic Chunks
+Code Symbols
+Code Relationships
+Feature Plans
+Changesets
+Changeset Branches
+Pull Requests
+```
+
+---
+
+# ▶️ Running Locally
 
 Start the development server:
 
+```bash
 npm run dev
+```
 
 Then open:
 
+```text
 http://localhost:3000
-🧪 Testing
+```
+
+---
+
+# 🧪 Testing
 
 Run the TypeScript type check:
 
+```bash
 npx tsc --noEmit
+```
 
 Run the complete test suite:
 
+```bash
 npm test
+```
 
 Run a specific test:
 
+```bash
 node --import tsx --test <test-file>
-📊 Current Project Status
-Area	Status
-Repository ingestion	✅
-GitHub repository ingestion	✅
-Semantic chunking	✅
-Embeddings / vector search	✅
-RAG chat	✅
-Repository summaries	✅
-AST symbol extraction	✅
-Code relationships	✅
-Architecture visualization	✅
-File Explorer	✅
-Authentication	✅
-Google OAuth	✅
-GitHub OAuth	✅
-AI feature planning	✅
-AI code generation	✅
-Versioned changesets	✅
-Diff viewer	✅
-Code validation	✅
-GitHub branch creation	✅
-Repository drift protection	✅
-GitHub commit / push	✅
-Pull Request creation	✅
-Navigation/data-fetch optimization	🚧
-AI code review	Planned
-🎯 Design Philosophy
+```
+
+---
+
+# 📊 Current Project Status
+
+| Feature | Status |
+|---|---|
+| Repository ingestion | ✅ Complete |
+| GitHub repository ingestion | ✅ Complete |
+| Semantic chunking | ✅ Complete |
+| Embeddings / vector search | ✅ Complete |
+| RAG chat | ✅ Complete |
+| Repository summaries | ✅ Complete |
+| AST symbol extraction | ✅ Complete |
+| Code relationships | ✅ Complete |
+| Architecture visualization | ✅ Complete |
+| File Explorer | ✅ Complete |
+| Authentication | ✅ Complete |
+| Google OAuth | ✅ Complete |
+| GitHub OAuth | ✅ Complete |
+| AI feature planning | ✅ Complete |
+| AI code generation | ✅ Complete |
+| Versioned changesets | ✅ Complete |
+| Diff viewer | ✅ Complete |
+| Code validation | ✅ Complete |
+| GitHub branch creation | ✅ Complete |
+| Repository drift protection | ✅ Complete |
+| GitHub commit / push | ✅ Complete |
+| Pull Request creation | ✅ Complete |
+| Navigation / data-fetch optimization | 🚧 In Progress |
+| AI code review | 🎯 Planned |
+
+---
+
+# 🎯 Design Philosophy
 
 CodeGraph is built around three principles.
 
-1. Understand Before Modifying
+## 1. Understand Before Modifying
 
 The system should understand the repository before proposing changes.
 
+```text
 Repository
-   ↓
+    ↓
 AST + Semantic Analysis
-   ↓
+    ↓
 Code Graph
-   ↓
-Context
-   ↓
+    ↓
+Repository Context
+    ↓
 AI Planning
-2. Review Before Applying
+```
+
+The AI should not treat a repository as a pile of unrelated files.
+
+---
+
+## 2. Review Before Applying
 
 AI-generated code should not immediately modify the user's repository.
 
+```text
 Generate
-   ↓
+    ↓
 Diff
-   ↓
+    ↓
 Validate
-   ↓
+    ↓
 Human Approval
-   ↓
+    ↓
 Apply
+```
 
-The developer remains in control.
+The developer remains in control of the final change.
 
-3. Never Destroy Existing Work
+---
+
+## 3. Never Destroy Existing Work
 
 Before applying changes, CodeGraph verifies that the repository still matches the state against which the changeset was generated.
 
 If it does not:
 
+```text
 STOP
+```
 
 rather than silently overwriting newer code.
 
-🔮 Future Improvements
+---
 
-Potential future directions include:
+# 🚧 Future Improvements
 
-AI-powered code review
-GitHub PR review comments
-Automated handling of CI failures
-Test failure analysis
-Improved repository-level agent workflows
-GitHub issue integration
-More language support
-More framework-specific architecture detection
-Advanced repository change impact analysis
+Potential future improvements include:
 
-These are intentionally separate from the core repository understanding and safe code-change workflow.
+- AI-powered code review
+- More advanced repository dependency analysis
+- Improved architecture detection
+- Better language support
+- More validation strategies
+- Improved navigation performance
+- Smarter client-side data caching
+- Background repository analysis
+- More GitHub workflow automation
+- Improved large-repository support
+- Advanced code impact analysis
 
-🤝 Contributing
+---
+
+# 🤝 Contributing
 
 Contributions are welcome.
 
-A typical workflow is:
+A typical development workflow is:
 
-git checkout -b feature/my-feature
+```text
+Fork
+  ↓
+Create Feature Branch
+  ↓
+Make Changes
+  ↓
+Run Type Check
+  ↓
+Run Tests
+  ↓
+Submit Pull Request
+```
 
-Make your changes, run:
+Please keep changes focused and maintain the existing project architecture.
 
-npx tsc --noEmit
-npm test
+---
 
-Then open a Pull Request.
+# 📜 License
 
-📜 License
+Add the project's actual license information here.
 
-Add the project's chosen license here.
+If this repository is released under the MIT License, include an actual `LICENSE` file in the repository and state:
 
-👨‍💻 Author
+```text
+MIT License
+```
 
-Kishore
+Do not claim a license that is not actually present in the repository.
 
-Built as an AI-powered developer tooling project focused on repository understanding, intelligent code modification, and safe GitHub workflows.
+---
 
-⭐ Why CodeGraph?
+# 👨‍💻 Author
 
-Traditional AI coding tools often operate primarily on the code currently visible to the model.
+**Gaurang Kishore**
 
-CodeGraph attempts to build a deeper representation of the repository:
+Built as an exploration of AI-assisted software engineering, repository intelligence, code analysis, RAG, and safe automated development workflows.
 
-Files
-  +
-Semantic Context
-  +
-AST
-  +
-Symbols
-  +
-Relationships
-  +
-Architecture
-  +
-Git History / Changes
-        ↓
-Repository Intelligence
-        ↓
-AI-Assisted Development
+---
 
-The result is a workflow where AI doesn't just answer questions about code.
+# ⭐ Project Summary
+
+CodeGraph is designed to bridge the gap between **AI-generated code** and **responsible software engineering**.
+
+It combines:
+
+```text
+Semantic Understanding
+        +
+AST Analysis
+        +
+Code Graph
+        +
+RAG
+        +
+AI Planning
+        +
+AI Code Generation
+        +
+Human Review
+        +
+Validation
+        +
+GitHub Automation
+```
+
+into a single developer workflow.
+
+The core idea is:
+
+> **Understand the code. Plan the change. Generate the code. Review the diff. Validate it. Then ship it safely.**
