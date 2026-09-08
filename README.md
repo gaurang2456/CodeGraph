@@ -1037,20 +1037,6 @@ Please keep changes focused and maintain the existing project architecture.
 
 ---
 
-# 📜 License
-
-Add the project's actual license information here.
-
-If this repository is released under the MIT License, include an actual `LICENSE` file in the repository and state:
-
-```text
-MIT License
-```
-
-Do not claim a license that is not actually present in the repository.
-
----
-
 # 👨‍💻 Author
 
 **Gaurang Kishore**
